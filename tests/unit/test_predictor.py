@@ -8,7 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from hvac_optimizer.core.predictor import CyclingPredictor
+from climatiq.core.predictor import CyclingPredictor
 
 
 @pytest.fixture

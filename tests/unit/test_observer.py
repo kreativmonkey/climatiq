@@ -3,8 +3,8 @@
 
 import pytest
 
-from hvac_optimizer.core.entities import SystemMode
-from hvac_optimizer.core.observer import Observer
+from climatiq.core.entities import SystemMode
+from climatiq.core.observer import Observer
 
 
 @pytest.fixture

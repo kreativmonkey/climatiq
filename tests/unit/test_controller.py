@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 
 import pytest
 
-from hvac_optimizer.core.controller import ActionType, ControlAction, Controller
-from hvac_optimizer.core.entities import OptimizerStatus, SystemMode, UnitStatus
+from climatiq.core.controller import ActionType, ControlAction, Controller
+from climatiq.core.entities import OptimizerStatus, SystemMode, UnitStatus
 
 
 @pytest.fixture

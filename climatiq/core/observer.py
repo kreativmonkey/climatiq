@@ -4,8 +4,8 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from hvac_optimizer.analysis.cycling_detector import CyclingDetector
-from hvac_optimizer.core.entities import OptimizerStatus, UnitStatus
+from climatiq.analysis.cycling_detector import CyclingDetector
+from climatiq.core.entities import OptimizerStatus, UnitStatus
 
 logger = logging.getLogger(__name__)
 

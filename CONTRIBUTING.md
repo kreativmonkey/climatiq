@@ -1,4 +1,4 @@
-# Contributing to HVAC Optimizer
+# Contributing to ClimatIQ
 
 Danke für dein Interesse an diesem Projekt! Hier findest du alle Infos, um mitzuentwickeln.
 
@@ -15,8 +15,8 @@ Danke für dein Interesse an diesem Projekt! Hier findest du alle Infos, um mitz
 
 ```bash
 # 1. Repository klonen
-git clone https://github.com/YOUR_USERNAME/hvac-optimizer.git
-cd hvac-optimizer
+git clone https://github.com/YOUR_USERNAME/climatiq.git
+cd climatiq
 
 # 2. Virtual Environment erstellen
 python3 -m venv venv
@@ -37,8 +37,8 @@ cp .env.example .env
 ### Projektstruktur
 
 ```
-hvac-optimizer/
-├── hvac_optimizer/           # Hauptpaket
+climatiq/
+├── climatiq/           # Hauptpaket
 │   ├── core/                 # Kernlogik
 │   │   ├── observer.py       # Datensammlung & Monitoring
 │   │   ├── analyzer.py       # Muster-Erkennung
@@ -67,7 +67,7 @@ hvac-optimizer/
 pytest
 
 # Mit Coverage
-pytest --cov=hvac_optimizer --cov-report=html
+pytest --cov=climatiq --cov-report=html
 
 # Nur Unit Tests (schnell, keine externe Abhängigkeiten)
 pytest tests/unit/
@@ -88,13 +88,13 @@ Wir nutzen:
 
 ```bash
 # Formatieren
-black hvac_optimizer/ tests/
+black climatiq/ tests/
 
 # Linting
-ruff check hvac_optimizer/ tests/
+ruff check climatiq/ tests/
 
 # Type Checking
-mypy hvac_optimizer/
+mypy climatiq/
 ```
 
 ### Pull Request Workflow

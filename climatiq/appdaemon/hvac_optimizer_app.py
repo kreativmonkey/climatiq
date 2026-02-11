@@ -21,12 +21,12 @@ except ImportError:
             pass
 
 
-from hvac_optimizer.core.analyzer import Analyzer
-from hvac_optimizer.core.controller import ActionType, ControlAction, Controller
-from hvac_optimizer.core.entities import SystemMode
-from hvac_optimizer.core.observer import Observer
-from hvac_optimizer.core.predictor import CyclingPredictor
-from hvac_optimizer.data.influx_v1_client import InfluxV1Client
+from climatiq.core.analyzer import Analyzer
+from climatiq.core.controller import ActionType, ControlAction, Controller
+from climatiq.core.entities import SystemMode
+from climatiq.core.observer import Observer
+from climatiq.core.predictor import CyclingPredictor
+from climatiq.data.influx_v1_client import InfluxV1Client
 
 
 class HVACOptimizer(hass.Hass):
@@ -384,7 +384,7 @@ class HVACOptimizer(hass.Hass):
 
             # Set state for main sensor
             self.set_state(
-                "sensor.hvac_optimizer_status",
+                "sensor.climatiq_status",
                 state=self.observer.status.mode.value,
                 attributes={
                     "power": data["observer"]["power"],

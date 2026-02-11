@@ -7,7 +7,7 @@ from pathlib import Path
 # Add parent directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from hvac_optimizer.data.influx_client import HVACDataLoader
+from climatiq.data.influx_client import HVACDataLoader
 
 
 def main():

@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "hvac-optimizer"
+name = "climatiq-control"
 version = "0.1.0"
 description = "Intelligent HVAC control to prevent compressor short-cycling"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [
-    {name = "HVAC Optimizer Contributors"}
+    {name = "ClimatIQ Contributors"}
 ]
 keywords = ["home-assistant", "hvac", "heat-pump", "machine-learning", "appdaemon"]
 classifiers = [
@@ -56,14 +56,14 @@ appdaemon = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/hvac-optimizer"
-Documentation = "https://github.com/YOUR_USERNAME/hvac-optimizer#readme"
-Repository = "https://github.com/YOUR_USERNAME/hvac-optimizer.git"
-Issues = "https://github.com/YOUR_USERNAME/hvac-optimizer/issues"
+Homepage = "https://github.com/YOUR_USERNAME/climatiq"
+Documentation = "https://github.com/YOUR_USERNAME/climatiq#readme"
+Repository = "https://github.com/YOUR_USERNAME/climatiq.git"
+Issues = "https://github.com/YOUR_USERNAME/climatiq/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
-include = ["hvac_optimizer*"]
+include = ["climatiq*"]
 
 [tool.black]
 line-length = 100
@@ -89,7 +89,7 @@ addopts = "-v --tb=short"
 asyncio_mode = "auto"
 
 [tool.coverage.run]
-source = ["hvac_optimizer"]
+source = ["climatiq"]
 omit = ["tests/*", "**/__init__.py"]
 
 [tool.coverage.report]

@@ -11,7 +11,7 @@ from datetime import UTC, datetime, timedelta
 from enum import Enum
 from typing import Any
 
-from hvac_optimizer.core.entities import OptimizerStatus, SystemMode
+from climatiq.core.entities import OptimizerStatus, SystemMode
 
 logger = logging.getLogger(__name__)
 

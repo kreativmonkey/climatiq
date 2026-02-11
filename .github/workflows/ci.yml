@@ -37,20 +37,20 @@ jobs:
 
       - name: Run linting (Ruff)
         run: |
-          ruff check hvac_optimizer/ tests/
+          ruff check climatiq/ tests/
 
       - name: Check formatting (Black)
         run: |
-          black --check hvac_optimizer/ tests/
+          black --check climatiq/ tests/
 
       - name: Run type checking (MyPy)
         run: |
-          mypy hvac_optimizer/ --ignore-missing-imports
+          mypy climatiq/ --ignore-missing-imports
         continue-on-error: true  # Don't fail on type errors for now
 
       - name: Run tests with coverage
         run: |
-          pytest --cov=hvac_optimizer --cov-report=xml --cov-report=term-missing
+          pytest --cov=climatiq --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4

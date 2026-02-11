@@ -1,6 +1,8 @@
-# HVAC Optimizer
+# ClimatIQ
 
-Intelligent control system for heat pump / air conditioning units to minimize short-cycling (compressor on/off switching) while maintaining comfort temperature.
+**Intelligent Climate Control for Home Assistant**
+
+ClimatIQ prevents compressor short-cycling in heat pump and air conditioning systems while maintaining your desired comfort temperature. It uses machine learning to automatically discover optimal operating parameters and proactively adjusts your system before problems occur.
 
 ## Features
 
@@ -33,7 +35,7 @@ This project uses machine learning to predict when cycling will occur and proact
 ```bash
 # Clone repository
 git clone <repo-url>
-cd hvac-optimizer
+cd climatiq
 
 # Create virtual environment
 python -m venv venv
@@ -56,22 +58,22 @@ See `config/config.example.yaml` for configuration options.
 
 ### Data Analysis
 ```bash
-python -m hvac_optimizer.analyze
+python -m climatiq.analyze
 ```
 
 ### Training
 ```bash
-python -m hvac_optimizer.train
+python -m climatiq.train
 ```
 
 ### Live Control (AppDaemon)
-Copy `appdaemon/apps/hvac_optimizer.py` to your AppDaemon apps folder.
+Copy `appdaemon/apps/climatiq.py` to your AppDaemon apps folder.
 
 ## Project Structure
 
 ```
-hvac-optimizer/
-├── hvac_optimizer/       # Main Python package
+climatiq/
+├── climatiq/       # Main Python package
 │   ├── __init__.py
 │   ├── data/             # Data loading & preprocessing
 │   ├── models/           # ML models

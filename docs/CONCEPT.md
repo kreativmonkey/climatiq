@@ -1,4 +1,4 @@
-# HVAC Optimizer - Konzept
+# ClimatIQ - Konzept
 
 ## Ziel
 Ein selbstlernendes Home Assistant Tool, das Multi-Split Klimaanlagen so steuert, dass **Kompressor-Takten vermieden** wird, während die **Komforttemperatur** gehalten wird.
@@ -15,7 +15,7 @@ Ein selbstlernendes Home Assistant Tool, das Multi-Split Klimaanlagen so steuert
 │         └────────────────┼────────────────┘             │
 │                          │                              │
 │              ┌───────────▼───────────┐                  │
-│              │   HVAC Optimizer      │                  │
+│              │   ClimatIQ      │                  │
 │              │   (AppDaemon App)     │                  │
 │              └───────────┬───────────┘                  │
 │                          │                              │
@@ -111,8 +111,8 @@ Einfache Regeln basierend auf Analyse:
 ### Als AppDaemon App
 ```yaml
 # apps.yaml
-hvac_optimizer:
-  module: hvac_optimizer
+climatiq:
+  module: climatiq
   class: HVACOptimizer
   
   # Geräte-Konfiguration
@@ -147,10 +147,10 @@ hvac_optimizer:
 ```
 
 ### Entities die erstellt werden
-- `sensor.hvac_optimizer_status` - Aktueller Zustand
+- `sensor.climatiq_status` - Aktueller Zustand
 - `sensor.hvac_cycling_risk` - Takt-Risiko (0-100%)
 - `sensor.hvac_efficiency_score` - Effizienz-Score
-- `switch.hvac_optimizer_enabled` - An/Aus
+- `switch.climatiq_enabled` - An/Aus
 - `number.hvac_target_power` - Ziel-Mindestleistung
 
 ## Sicherheit

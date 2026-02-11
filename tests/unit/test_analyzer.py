@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from hvac_optimizer.core.analyzer import AnalysisResult, Analyzer
+from climatiq.core.analyzer import AnalysisResult, Analyzer
 
 
 @pytest.fixture
