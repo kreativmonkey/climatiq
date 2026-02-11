@@ -1,0 +1,28 @@
+# Data handling
+pandas>=2.0.0
+numpy>=1.24.0
+influxdb-client>=1.36.0
+
+# Machine Learning
+scikit-learn>=1.3.0
+joblib>=1.3.0
+
+# Optional: Deep Learning
+# tensorflow>=2.13.0
+# torch>=2.0.0
+
+# Visualization (for analysis)
+matplotlib>=3.7.0
+seaborn>=0.12.0
+
+# Configuration
+python-dotenv>=1.0.0
+pyyaml>=6.0
+
+# Home Assistant / AppDaemon
+# appdaemon>=4.4.0  # Install separately in AppDaemon environment
+
+# Development
+pytest>=7.4.0
+black>=23.0.0
+flake8>=6.1.0
