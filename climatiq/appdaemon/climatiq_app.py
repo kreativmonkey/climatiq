@@ -29,7 +29,7 @@ from climatiq.core.predictor import CyclingPredictor
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 
-class HVACOptimizer(hass.Hass):
+class ClimatIQ(hass.Hass):
     """AppDaemon App for intelligent HVAC control."""
 
     def initialize(self):

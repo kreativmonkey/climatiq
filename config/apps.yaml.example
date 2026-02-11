@@ -1,9 +1,9 @@
-# Example AppDaemon configuration for HVAC Optimizer
+# Example AppDaemon configuration for ClimatIQ
 # Copy this to your AppDaemon apps folder and adjust values
 
-hvac_optimizer:
-  module: hvac_optimizer_app
-  class: HVACOptimizer
+climatiq:
+  module: climatiq_app
+  class: ClimatIQ
   
   # Indoor Units Configuration
   # List all your climate entities here
@@ -65,6 +65,6 @@ hvac_optimizer:
   # Machine Learning Settings
   learning:
     enabled: true
-    model_path: /config/appdaemon/apps/hvac_optimizer/models/predictor.joblib
+    model_path: /config/appdaemon/apps/climatiq/models/predictor.joblib
     min_observation_hours: 24   # Minimum hours before leaving observation mode
     retrain_interval_days: 7    # How often to retrain the model
