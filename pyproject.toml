@@ -1,0 +1,100 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "hvac-optimizer"
+version = "0.1.0"
+description = "Intelligent HVAC control to prevent compressor short-cycling"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.11"
+authors = [
+    {name = "HVAC Optimizer Contributors"}
+]
+keywords = ["home-assistant", "hvac", "heat-pump", "machine-learning", "appdaemon"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+
+dependencies = [
+    "pandas>=2.0.0",
+    "numpy>=1.24.0",
+    "influxdb-client>=1.36.0",
+    "scikit-learn>=1.3.0",
+    "lightgbm>=4.0.0",
+    "joblib>=1.3.0",
+    "python-dotenv>=1.0.0",
+    "pyyaml>=6.0",
+    "pydantic>=2.0.0",
+    "pydantic-settings>=2.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-cov>=4.1.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.0.0",
+    "ruff>=0.1.0",
+    "mypy>=1.5.0",
+    "pre-commit>=3.4.0",
+    "pandas-stubs>=2.0.0",
+]
+rl = [
+    "stable-baselines3>=2.1.0",
+    "gymnasium>=0.29.0",
+]
+appdaemon = [
+    "appdaemon>=4.4.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/YOUR_USERNAME/hvac-optimizer"
+Documentation = "https://github.com/YOUR_USERNAME/hvac-optimizer#readme"
+Repository = "https://github.com/YOUR_USERNAME/hvac-optimizer.git"
+Issues = "https://github.com/YOUR_USERNAME/hvac-optimizer/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["hvac_optimizer*"]
+
+[tool.black]
+line-length = 100
+target-version = ["py311", "py312", "py313"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+select = ["E", "F", "I", "N", "W", "UP"]
+ignore = ["E501"]
+
+[tool.mypy]
+python_version = "3.11"
+warn_return_any = true
+warn_unused_configs = true
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+asyncio_mode = "auto"
+
+[tool.coverage.run]
+source = ["hvac_optimizer"]
+omit = ["tests/*", "**/__init__.py"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+]

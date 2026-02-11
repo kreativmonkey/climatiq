@@ -1,0 +1,70 @@
+# Example AppDaemon configuration for HVAC Optimizer
+# Copy this to your AppDaemon apps folder and adjust values
+
+hvac_optimizer:
+  module: hvac_optimizer_app
+  class: HVACOptimizer
+  
+  # Indoor Units Configuration
+  # List all your climate entities here
+  indoor_units:
+    - name: erdgeschoss
+      entity_id: climate.erdgeschoss
+      temp_sensor: sensor.eg_temperatur
+      priority: high  # high = comfort priority, won't be used as buffer
+    
+    - name: schlafzimmer
+      entity_id: climate.schlafzimmer
+      temp_sensor: sensor.schlafzimmer_temperatur
+      priority: medium
+    
+    - name: arbeitszimmer
+      entity_id: climate.arbeitszimmer
+      temp_sensor: sensor.arbeitszimmer_temperatur
+      priority: medium
+    
+    - name: kinderzimmer
+      entity_id: climate.kinderzimmer
+      temp_sensor: sensor.kinderzimmer_temperatur
+      priority: medium
+    
+    - name: ankleide
+      entity_id: climate.ankleide
+      temp_sensor: sensor.ankleide_temperatur
+      priority: low  # low = can be used as thermal buffer
+  
+  # Power consumption sensor (required)
+  power_sensor: sensor.ac_current_energy
+  
+  # Outdoor temperature sensor (optional but recommended)
+  outdoor_temp: sensor.ac_temperatur_outdoor
+  
+  # InfluxDB Configuration
+  # For historical data analysis
+  influxdb:
+    host: 192.168.10.25
+    port: 8086
+    user: your_user
+    password: your_password
+    database: homeassistant
+  
+  # Comfort Settings
+  comfort:
+    target_temp: 21.0    # Default target temperature
+    min_temp: 19.0       # Never go below this
+    max_temp: 24.0       # Never go above this
+    tolerance: 0.5       # Acceptable deviation
+  
+  # Cycling Detection Settings
+  # These are auto-discovered, but can be overridden
+  cycling:
+    power_on_threshold: 300   # Watts - compressor considered "on"
+    power_off_threshold: 150  # Watts - compressor considered "off"
+    min_cycle_minutes: 10     # Cycles shorter than this are "short cycling"
+  
+  # Machine Learning Settings
+  learning:
+    enabled: true
+    model_path: /config/appdaemon/apps/hvac_optimizer/models/predictor.joblib
+    min_observation_hours: 24   # Minimum hours before leaving observation mode
+    retrain_interval_days: 7    # How often to retrain the model

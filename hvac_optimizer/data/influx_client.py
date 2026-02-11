@@ -1,8 +1,7 @@
 """InfluxDB client for loading historical HVAC data."""
 
 import os
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
 import pandas as pd
 from dotenv import load_dotenv
@@ -14,14 +13,14 @@ class HVACDataLoader:
 
     def __init__(
         self,
-        host: Optional[str] = None,
-        port: Optional[int] = None,
-        token: Optional[str] = None,
+        host: str | None = None,
+        port: int | None = None,
+        token: str | None = None,
         org: str = "-",
-        bucket: Optional[str] = None,
+        bucket: str | None = None,
     ):
         """Initialize InfluxDB connection.
-        
+
         Args:
             host: InfluxDB host (default from env)
             port: InfluxDB port (default from env)
@@ -35,7 +34,7 @@ class HVACDataLoader:
         self.port = port or int(os.getenv("INFLUXDB_PORT", "8086"))
         self.org = org
         self.bucket = bucket or os.getenv("INFLUXDB_DATABASE", "homeassistant")
-        
+
         # Build token from user:password if not provided
         if token:
             self.token = token
@@ -45,7 +44,7 @@ class HVACDataLoader:
             self.token = f"{user}:{password}"
 
         self.url = f"http://{self.host}:{self.port}"
-        self._client: Optional[InfluxDBClient] = None
+        self._client: InfluxDBClient | None = None
 
     @property
     def client(self) -> InfluxDBClient:
@@ -69,10 +68,10 @@ class HVACDataLoader:
 
     def list_measurements(self) -> list[str]:
         """List available measurements in the bucket."""
-        query = f'''
+        query = f"""
         import "influxdata/influxdb/schema"
         schema.measurements(bucket: "{self.bucket}")
-        '''
+        """
         try:
             result = self.client.query_api().query(query, org=self.org)
             measurements = []
@@ -86,13 +85,13 @@ class HVACDataLoader:
 
     def list_fields(self, measurement: str) -> list[str]:
         """List available fields for a measurement."""
-        query = f'''
+        query = f"""
         import "influxdata/influxdb/schema"
         schema.measurementFieldKeys(
             bucket: "{self.bucket}",
             measurement: "{measurement}"
         )
-        '''
+        """
         try:
             result = self.client.query_api().query(query, org=self.org)
             fields = []
@@ -109,49 +108,49 @@ class HVACDataLoader:
         measurement: str,
         fields: list[str],
         start: datetime,
-        stop: Optional[datetime] = None,
-        entity_id: Optional[str] = None,
+        stop: datetime | None = None,
+        entity_id: str | None = None,
     ) -> pd.DataFrame:
         """Query data for a time range.
-        
+
         Args:
             measurement: InfluxDB measurement name
             fields: List of fields to query
             start: Start datetime
             stop: End datetime (default: now)
             entity_id: Optional Home Assistant entity_id filter
-            
+
         Returns:
             DataFrame with timestamp index and field columns
         """
         stop = stop or datetime.utcnow()
-        
+
         # Build field filter
         field_filter = " or ".join([f'r._field == "{f}"' for f in fields])
-        
+
         # Build entity filter
         entity_filter = ""
         if entity_id:
             entity_filter = f'|> filter(fn: (r) => r.entity_id == "{entity_id}")'
 
-        query = f'''
+        query = f"""
         from(bucket: "{self.bucket}")
             |> range(start: {start.isoformat()}Z, stop: {stop.isoformat()}Z)
             |> filter(fn: (r) => r._measurement == "{measurement}")
             |> filter(fn: (r) => {field_filter})
             {entity_filter}
             |> pivot(rowKey: ["_time"], columnKey: ["_field"], valueColumn: "_value")
-        '''
-        
+        """
+
         try:
             result = self.client.query_api().query_data_frame(query, org=self.org)
             if isinstance(result, list):
                 result = pd.concat(result, ignore_index=True)
-            
+
             if "_time" in result.columns:
                 result = result.set_index("_time")
                 result.index = pd.to_datetime(result.index)
-            
+
             return result
         except Exception as e:
             print(f"Query failed: {e}")
@@ -180,10 +179,10 @@ def test_influx_connection() -> dict:
         "connected": loader.test_connection(),
         "measurements": [],
     }
-    
+
     if result["connected"]:
         result["measurements"] = loader.list_measurements()[:20]  # First 20
-    
+
     loader.close()
     return result
 
