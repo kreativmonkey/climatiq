@@ -1,253 +1,263 @@
-"""Predictor module for forecasting cycling events.
+"""Predictor module for cycling prediction.
 
-Uses machine learning to predict when the compressor will start cycling,
-allowing preemptive action to prevent it.
+Uses a combination of machine learning (RandomForestClassifier) and heuristics
+to predict whether cycling will occur in the near future.
 """
 
-import logging
-from datetime import UTC, datetime
-from pathlib import Path
-from typing import Any
+from __future__ import annotations
 
-import joblib
+import logging
+from pathlib import Path
+from typing import Any, Optional
+
+import numpy as np
 import pandas as pd
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import precision_recall_fscore_support
-from sklearn.model_selection import cross_val_score, train_test_split
 
 logger = logging.getLogger(__name__)
 
+# Optional ML imports
+try:
+    import joblib
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.model_selection import cross_val_score
+
+    HAS_SKLEARN = True
+except ImportError:
+    HAS_SKLEARN = False
+
 
 class CyclingPredictor:
-    """Predicts cycling events using supervised learning.
+    """Predicts the likelihood of cycling based on historical data and current state.
 
-    The model learns from historical data to predict:
-    "Will the system start cycling in the next N minutes?"
+    Supports:
+    - Feature engineering from raw power/compressor/temperature data
+    - Label generation (is cycling imminent in the next N minutes?)
+    - Training a RandomForestClassifier
+    - Prediction with ML model or heuristic fallback
+    - Model persistence (save/load)
     """
 
-    PREDICTION_HORIZON_MINUTES = 10  # Predict cycling within next 10 min
+    # Minimum samples required for training
     MIN_TRAINING_SAMPLES = 500
-    FEATURE_COLUMNS = [
-        "power",
-        "power_trend",
-        "power_std",
-        "outdoor_temp",
-        "avg_room_temp",
-        "temp_diff",
-        "hour",
-        "active_units",
-        "compressor_runtime",
-    ]
 
-    def __init__(self, model_path: Path | None = None):
-        self.model_path = model_path
-        self.model: RandomForestClassifier | None = None
-        self.is_trained = False
-        self.feature_importance: dict[str, float] = {}
-        self.metrics: dict[str, float] = {}
-        self._load_model()
+    # Look-ahead window for label generation (minutes)
+    LABEL_LOOKAHEAD_MINUTES = 10
 
-    def _load_model(self):
-        """Try to load existing model from disk."""
-        if self.model_path and self.model_path.exists():
-            try:
-                data = joblib.load(self.model_path)
-                self.model = data["model"]
-                self.feature_importance = data.get("feature_importance", {})
-                self.metrics = data.get("metrics", {})
-                self.is_trained = True
-                logger.info(f"Loaded model from {self.model_path}")
-            except Exception as e:
-                logger.warning(f"Could not load model: {e}")
+    # Minimum state changes per hour to count as cycling
+    CYCLING_THRESHOLD_CHANGES_PER_HOUR = 4
 
-    def save_model(self):
-        """Save model to disk."""
-        if self.model and self.model_path:
-            data = {
-                "model": self.model,
-                "feature_importance": self.feature_importance,
-                "metrics": self.metrics,
-                "saved_at": datetime.now(UTC).isoformat(),
-            }
-            self.model_path.parent.mkdir(parents=True, exist_ok=True)
-            joblib.dump(data, self.model_path)
-            logger.info(f"Saved model to {self.model_path}")
-
-    def prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Prepare feature matrix from raw data.
+    def __init__(self, model_path: Optional[Path | str] = None):
+        """Initialize the predictor.
 
         Args:
-            df: DataFrame with columns like 'power', 'outdoor_temp', etc.
+            model_path: Path to load/save the trained model. If the file exists
+                        the model is loaded automatically.
+        """
+        self.model_path = Path(model_path) if model_path else None
+        self.model: Any = None
+        self._metrics: dict[str, Any] = {}
+        self._feature_importance: dict[str, float] = {}
 
-        Returns:
-            DataFrame with engineered features
+        # Try to load existing model
+        if self.model_path and self.model_path.exists():
+            self._load_model()
+
+    # ------------------------------------------------------------------
+    # Properties
+    # ------------------------------------------------------------------
+
+    @property
+    def is_trained(self) -> bool:
+        return self.model is not None
+
+    # ------------------------------------------------------------------
+    # Feature engineering
+    # ------------------------------------------------------------------
+
+    def prepare_features(self, df: pd.DataFrame) -> pd.DataFrame:
+        """Prepare feature columns from raw data.
+
+        Expected input columns (at least ``power``):
+        - power: current power consumption (W)
+        - outdoor_temp (optional)
+        - compressor_on (optional)
+
+        Generated features:
+        - power
+        - power_trend: rolling mean of power over 10 samples
+        - power_std: rolling std of power over 10 samples
+        - hour: hour of the day
+        - outdoor_temp (if present, else 0)
+        - active_units (if present, else 0)
+        - power_diff: first-order diff of power
+        - power_diff_abs: absolute first-order diff
+        - compressor_runtime: cumulative minutes compressor has been on
         """
         features = pd.DataFrame(index=df.index)
 
-        # Power features
         features["power"] = df["power"]
-        features["power_trend"] = df["power"].diff(5).fillna(0)  # 5-min trend
+        features["power_trend"] = df["power"].rolling(10, min_periods=1).mean()
         features["power_std"] = df["power"].rolling(10, min_periods=1).std().fillna(0)
-
-        # Temperature features
-        if "outdoor_temp" in df.columns:
-            features["outdoor_temp"] = df["outdoor_temp"].ffill().bfill().fillna(10.0)
-        else:
-            features["outdoor_temp"] = 10.0  # Default
-
-        # Room temperatures - average if multiple
-        room_cols = [c for c in df.columns if "room_temp" in c or c.endswith("_temp")]
-        room_cols = [c for c in room_cols if c != "outdoor_temp"]
-        if room_cols:
-            features["avg_room_temp"] = df[room_cols].mean(axis=1).fillna(21.0)
-        else:
-            features["avg_room_temp"] = 21.0
-
-        # Temperature difference from target (assumed 21°C)
-        target_temp = 21.0
-        features["temp_diff"] = features["avg_room_temp"] - target_temp
-
-        # Time features
         features["hour"] = df.index.hour
 
-        # Active units (if available)
-        if "active_units" in df.columns:
-            features["active_units"] = df["active_units"]
-        else:
-            features["active_units"] = 1
+        # Optional columns
+        features["outdoor_temp"] = df["outdoor_temp"] if "outdoor_temp" in df.columns else 0.0
 
-        # Compressor runtime (minutes since last start)
+        # Power dynamics
+        features["power_diff"] = df["power"].diff().fillna(0)
+        features["power_diff_abs"] = features["power_diff"].abs()
+
+        # Compressor runtime (cumulative on-time in minutes)
         if "compressor_on" in df.columns:
-            starts = df["compressor_on"].diff() == 1
-            runtime = pd.Series(0, index=df.index)
-            current_runtime = 0
-            for i, (idx, is_start) in enumerate(starts.items()):
-                if is_start:
-                    current_runtime = 0
-                elif df.loc[idx, "compressor_on"]:
-                    current_runtime += 1
-                runtime.iloc[i] = current_runtime
-            features["compressor_runtime"] = runtime
+            # Approximate: each row ≈ 1 minute
+            on_mask = df["compressor_on"].astype(int)
+            # Reset cumsum on each off→on transition
+            groups = (~df["compressor_on"]).cumsum()
+            features["compressor_runtime"] = on_mask.groupby(groups).cumsum()
         else:
             features["compressor_runtime"] = 0
 
+        # Active units (if available)
+        features["active_units"] = df["active_units"] if "active_units" in df.columns else 0
+
         return features
 
-    def prepare_labels(self, df: pd.DataFrame) -> pd.Series:
-        """Create labels: 1 if cycling occurs within prediction horizon."""
-        if "state_change" not in df.columns:
-            raise ValueError("DataFrame must have 'state_change' column")
+    # ------------------------------------------------------------------
+    # Label generation
+    # ------------------------------------------------------------------
 
-        # Rolling sum of state changes in next N minutes
-        horizon = self.PREDICTION_HORIZON_MINUTES
-        future_cycles = (
-            df["state_change"].iloc[::-1].rolling(horizon, min_periods=1).sum().iloc[::-1]
+    def prepare_labels(self, df: pd.DataFrame) -> pd.Series:
+        """Create binary labels: 1 if cycling occurs within the look-ahead window.
+
+        Cycling is detected via ``state_change`` column (if present) or derived
+        from ``compressor_on``.  A label of 1 means "within the next N minutes
+        there will be frequent state changes (cycling)".
+        """
+        if "state_change" in df.columns:
+            changes = df["state_change"]
+        elif "compressor_on" in df.columns:
+            changes = df["compressor_on"].astype(int).diff().abs().fillna(0)
+        else:
+            # Cannot generate labels without state info
+            return pd.Series(0, index=df.index)
+
+        window = self.LABEL_LOOKAHEAD_MINUTES
+
+        # Count state changes in the forward-looking window using a reversed
+        # rolling sum: reverse the series, apply rolling sum, then reverse back.
+        # This effectively sums the *next* ``window`` values for each position.
+        forward_changes = (
+            changes.iloc[::-1]
+            .rolling(window, min_periods=1)
+            .sum()
+            .iloc[::-1]
         )
 
-        # Label is 1 if any cycling in the horizon
-        labels = (future_cycles >= 2).astype(int)  # 2 changes = 1 full cycle
+        # Convert a per-hour threshold into a threshold for the window.
+        # Example: 4 changes/hour over a 10-minute window ≈ 0.67 → threshold 1.
+        threshold_in_window = int(
+            np.ceil(self.CYCLING_THRESHOLD_CHANGES_PER_HOUR * (window / 60.0))
+        )
+        threshold_in_window = max(1, threshold_in_window)
 
+        labels = (forward_changes >= threshold_in_window).astype(int)
         return labels
+
+    # ------------------------------------------------------------------
+    # Training
+    # ------------------------------------------------------------------
 
     def train(self, df: pd.DataFrame) -> dict[str, Any]:
         """Train the prediction model on historical data.
 
         Args:
-            df: DataFrame with power, temperatures, and cycling info
+            df: DataFrame with at least ``power`` and ``state_change`` or
+                ``compressor_on`` columns.
 
         Returns:
-            Dict with training metrics
+            dict with ``success`` (bool), ``metrics`` (if successful), or
+            ``error`` (if failed).
         """
-        logger.info(f"Starting training with {len(df)} samples")
+        if not HAS_SKLEARN:
+            return {"success": False, "error": "scikit-learn is not installed"}
 
         if len(df) < self.MIN_TRAINING_SAMPLES:
             return {
                 "success": False,
-                "error": f"Nicht genug Daten: {len(df)} < {self.MIN_TRAINING_SAMPLES}",
+                "error": f"Zu wenige Daten ({len(df)}/{self.MIN_TRAINING_SAMPLES}). Benötigt mindestens {self.MIN_TRAINING_SAMPLES} Datenpunkte.",
             }
 
-        # Prepare features and labels
-        X = self.prepare_features(df)
-        y = self.prepare_labels(df)
+        try:
+            features = self.prepare_features(df)
+            labels = self.prepare_labels(df)
 
-        # Align and clean
-        common_idx = X.index.intersection(y.index)
-        X = X.loc[common_idx]
-        y = y.loc[common_idx]
+            # Drop rows with NaN (from rolling windows / shifts)
+            mask = features.notna().all(axis=1) & labels.notna()
+            X = features.loc[mask]
+            y = labels.loc[mask]
 
-        # Drop NaN
-        mask = ~(X.isna().any(axis=1) | y.isna())
-        X = X[mask]
-        y = y[mask]
+            if len(X) < self.MIN_TRAINING_SAMPLES:
+                return {
+                    "success": False,
+                    "error": f"Nach Bereinigung zu wenige Daten ({len(X)}).",
+                }
 
-        if len(X) < self.MIN_TRAINING_SAMPLES:
-            return {"success": False, "error": f"Nach Bereinigung nur {len(X)} Samples übrig"}
+            # Train RandomForest
+            model = RandomForestClassifier(
+                n_estimators=100,
+                max_depth=10,
+                random_state=42,
+                class_weight="balanced",
+                n_jobs=-1,
+            )
 
-        # Select only available feature columns
-        available_features = [c for c in self.FEATURE_COLUMNS if c in X.columns]
-        X = X[available_features]
+            # Cross-validation
+            cv_scores = cross_val_score(model, X, y, cv=5, scoring="f1")
 
-        # Split data
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y, test_size=0.2, random_state=42, stratify=y
-        )
+            # Fit on full data
+            model.fit(X, y)
 
-        # Train model
-        self.model = RandomForestClassifier(
-            n_estimators=100,
-            max_depth=10,
-            min_samples_leaf=10,
-            class_weight="balanced",
-            random_state=42,
-            n_jobs=-1,
-        )
+            self.model = model
+            self._metrics = {
+                "f1_mean": float(np.mean(cv_scores)),
+                "f1_std": float(np.std(cv_scores)),
+                "training_samples": len(X),
+                "positive_rate": float(y.mean()),
+            }
 
-        self.model.fit(X_train, y_train)
+            # Feature importance
+            self._feature_importance = dict(
+                zip(X.columns, model.feature_importances_)
+            )
 
-        # Evaluate
-        y_pred = self.model.predict(X_test)
-        precision, recall, f1, _ = precision_recall_fscore_support(
-            y_test, y_pred, average="binary", zero_division=0
-        )
+            logger.info(
+                "Model trained: F1=%.3f ± %.3f on %d samples",
+                self._metrics["f1_mean"],
+                self._metrics["f1_std"],
+                len(X),
+            )
 
-        # Cross-validation
-        cv_scores = cross_val_score(self.model, X, y, cv=5, scoring="f1")
+            return {"success": True, "metrics": self._metrics}
 
-        # Feature importance
-        self.feature_importance = dict(zip(available_features, self.model.feature_importances_))
+        except Exception as e:
+            logger.error("Training failed: %s", e)
+            return {"success": False, "error": str(e)}
 
-        self.metrics = {
-            "precision": float(precision),
-            "recall": float(recall),
-            "f1_score": float(f1),
-            "cv_f1_mean": float(cv_scores.mean()),
-            "cv_f1_std": float(cv_scores.std()),
-            "training_samples": len(X_train),
-            "test_samples": len(X_test),
-            "positive_ratio": float(y.mean()),
-        }
+    # ------------------------------------------------------------------
+    # Prediction
+    # ------------------------------------------------------------------
 
-        self.is_trained = True
-        self.save_model()
-
-        logger.info(f"Training complete. F1 Score: {f1:.3f}")
-
-        return {
-            "success": True,
-            "metrics": self.metrics,
-            "feature_importance": self.feature_importance,
-        }
-
-    def predict(self, current_state: pd.DataFrame) -> dict[str, Any]:
-        """Predict if cycling will occur soon.
+    def predict(self, df: pd.DataFrame) -> dict[str, Any]:
+        """Predict cycling risk for the given data window.
 
         Args:
-            current_state: Recent data (last ~30 minutes)
+            df: Recent data window (e.g. last 30 minutes).
 
         Returns:
-            Dict with prediction and confidence
+            dict with ``cycling_predicted``, ``probability``, ``confidence``,
+            and ``status``.
         """
-        if not self.is_trained or self.model is None:
+        if not self.is_trained:
             return {
                 "cycling_predicted": False,
                 "probability": 0.0,
@@ -255,58 +265,88 @@ class CyclingPredictor:
                 "status": "model_not_trained",
             }
 
-        # Prepare features from most recent data point
-        features = self.prepare_features(current_state)
-
-        if features.empty:
-            return {
-                "cycling_predicted": False,
-                "probability": 0.0,
-                "confidence": 0.0,
-                "status": "no_data",
-            }
-
-        # Use last row
-        X = features.iloc[[-1]]
-
-        # Select available features
-        available = [c for c in self.FEATURE_COLUMNS if c in X.columns]
-        X = X[available]
-
-        # Handle missing features
-        for col in self.FEATURE_COLUMNS:
-            if col not in X.columns:
-                X[col] = 0
-
-        X = X[self.FEATURE_COLUMNS]
-
-        # Predict
         try:
-            proba = self.model.predict_proba(X)[0]
-            cycling_prob = proba[1] if len(proba) > 1 else proba[0]
-            prediction = cycling_prob > 0.5
+            features = self.prepare_features(df)
+            # Use the last row for prediction (most recent state)
+            mask = features.notna().all(axis=1)
+            valid = features.loc[mask]
+
+            if valid.empty:
+                return {
+                    "cycling_predicted": False,
+                    "probability": 0.0,
+                    "confidence": 0.0,
+                    "status": "no_valid_features",
+                }
+
+            last_row = valid.iloc[[-1]]
+            proba = self.model.predict_proba(last_row)[0]
+
+            # proba is [prob_no_cycling, prob_cycling]
+            cycling_prob = float(proba[1]) if len(proba) > 1 else 0.0
+            cycling_predicted = cycling_prob > 0.5
 
             return {
-                "cycling_predicted": bool(prediction),
-                "probability": float(cycling_prob),
-                "confidence": float(abs(cycling_prob - 0.5) * 2),  # 0 at 50%, 1 at 0% or 100%
+                "cycling_predicted": cycling_predicted,
+                "probability": cycling_prob,
+                "confidence": float(self._metrics.get("f1_mean", 0.0)),
                 "status": "ok",
-                "horizon_minutes": self.PREDICTION_HORIZON_MINUTES,
             }
+
         except Exception as e:
-            logger.error(f"Prediction failed: {e}")
+            logger.error("Prediction failed: %s", e)
             return {
                 "cycling_predicted": False,
                 "probability": 0.0,
                 "confidence": 0.0,
-                "status": f"error: {str(e)}",
+                "status": f"error: {e}",
             }
+
+    # ------------------------------------------------------------------
+    # Persistence
+    # ------------------------------------------------------------------
+
+    def save_model(self):
+        """Save the trained model to disk."""
+        if not self.is_trained or not self.model_path:
+            logger.warning("Cannot save: model not trained or no path set.")
+            return
+
+        if not HAS_SKLEARN:
+            logger.warning("Cannot save: joblib not available.")
+            return
+
+        self.model_path.parent.mkdir(parents=True, exist_ok=True)
+        data = {
+            "model": self.model,
+            "metrics": self._metrics,
+            "feature_importance": self._feature_importance,
+        }
+        joblib.dump(data, self.model_path)
+        logger.info("Model saved to %s", self.model_path)
+
+    def _load_model(self):
+        """Load a previously saved model."""
+        if not HAS_SKLEARN or not self.model_path or not self.model_path.exists():
+            return
+
+        try:
+            data = joblib.load(self.model_path)
+            self.model = data["model"]
+            self._metrics = data.get("metrics", {})
+            self._feature_importance = data.get("feature_importance", {})
+            logger.info("Model loaded from %s", self.model_path)
+        except Exception as e:
+            logger.error("Failed to load model from %s: %s", self.model_path, e)
+
+    # ------------------------------------------------------------------
+    # Dashboard
+    # ------------------------------------------------------------------
 
     def get_dashboard_data(self) -> dict[str, Any]:
-        """Get data for Home Assistant dashboard."""
+        """Return data for HA dashboard."""
         return {
             "is_trained": self.is_trained,
-            "metrics": self.metrics,
-            "feature_importance": self.feature_importance,
-            "prediction_horizon": self.PREDICTION_HORIZON_MINUTES,
+            "metrics": self._metrics,
+            "feature_importance": self._feature_importance,
         }

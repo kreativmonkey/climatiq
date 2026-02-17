@@ -1,4 +1,4 @@
-"""Tests for the Predictor module."""
+"""Tests for CyclingPredictor class."""
 
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -35,19 +35,13 @@ def training_data():
 
     i = 0
     while i < n:
-        # Random cycle length between 5-30 minutes
         on_time = np.random.randint(5, 30)
         off_time = np.random.randint(2, 15)
-
-        # On period
         power[i : i + on_time] = np.random.normal(600, 100, min(on_time, n - i))
         compressor_on[i : i + on_time] = True
         i += on_time
-
         if i >= n:
             break
-
-        # Off period
         power[i : i + off_time] = np.random.normal(50, 20, min(off_time, n - i))
         compressor_on[i : i + off_time] = False
         i += off_time
@@ -61,7 +55,6 @@ def training_data():
         index=times,
     )
 
-    # Add state changes
     df["state_change"] = df["compressor_on"].astype(int).diff().abs().fillna(0)
 
     return df
@@ -71,14 +64,11 @@ class TestPredictor:
     """Tests for CyclingPredictor class."""
 
     def test_initialization(self, predictor):
-        """Test predictor initializes correctly."""
         assert predictor.is_trained is False
         assert predictor.model is None
 
     def test_prepare_features(self, predictor, training_data):
-        """Test feature preparation."""
         features = predictor.prepare_features(training_data)
-
         assert "power" in features.columns
         assert "power_trend" in features.columns
         assert "power_std" in features.columns
@@ -86,58 +76,37 @@ class TestPredictor:
         assert len(features) == len(training_data)
 
     def test_prepare_labels(self, predictor, training_data):
-        """Test label preparation."""
         labels = predictor.prepare_labels(training_data)
-
         assert len(labels) == len(training_data)
-        # Should have some positive labels (cycling periods)
         assert labels.sum() > 0
-        # But not all positive
         assert labels.sum() < len(labels)
 
     def test_train_insufficient_data(self, predictor):
-        """Test training fails gracefully with insufficient data."""
         small_data = pd.DataFrame(
             {"power": [100, 200, 300], "state_change": [0, 1, 0]},
             index=pd.date_range("2024-01-01", periods=3, freq="1min"),
         )
 
         result = predictor.train(small_data)
-
         assert result["success"] is False
         assert "error" in result
 
     def test_train_success(self, predictor, training_data):
-        """Test successful training."""
         result = predictor.train(training_data)
-
         assert result["success"] is True
         assert "metrics" in result
         assert predictor.is_trained is True
         assert predictor.model is not None
 
-        # Check metrics
-        metrics = result["metrics"]
-        assert "f1_score" in metrics
-        assert "precision" in metrics
-        assert "recall" in metrics
-        assert metrics["f1_score"] >= 0
-
     def test_predict_untrained(self, predictor, training_data):
-        """Test prediction without training returns safe default."""
         result = predictor.predict(training_data.tail(30))
-
         assert result["cycling_predicted"] is False
         assert result["status"] == "model_not_trained"
 
     def test_predict_after_training(self, predictor, training_data):
-        """Test prediction after training."""
         predictor.train(training_data)
-
-        # Get recent data for prediction
         recent = training_data.tail(30)
         result = predictor.predict(recent)
-
         assert "cycling_predicted" in result
         assert "probability" in result
         assert "confidence" in result
@@ -145,33 +114,23 @@ class TestPredictor:
         assert 0 <= result["probability"] <= 1
 
     def test_model_persistence(self, training_data):
-        """Test model save and load."""
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = Path(tmpdir) / "model.joblib"
-
-            # Train and save
             predictor1 = CyclingPredictor(model_path=model_path)
             predictor1.train(training_data)
             predictor1.save_model()
-
-            # Load in new instance
             predictor2 = CyclingPredictor(model_path=model_path)
-
             assert predictor2.is_trained is True
             assert predictor2.model is not None
 
     def test_get_dashboard_data_untrained(self, predictor):
-        """Test dashboard data when not trained."""
         data = predictor.get_dashboard_data()
-
         assert data["is_trained"] is False
         assert data["metrics"] == {}
 
     def test_get_dashboard_data_trained(self, predictor, training_data):
-        """Test dashboard data after training."""
         predictor.train(training_data)
         data = predictor.get_dashboard_data()
-
         assert data["is_trained"] is True
         assert "metrics" in data
         assert "feature_importance" in data

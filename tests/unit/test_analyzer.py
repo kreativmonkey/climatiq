@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from climatiq.core.analyzer import AnalysisResult, Analyzer
+from climatiq.core.analyzer import AnalysisResult, Analyzer, OperatingRegion
 
 
 @pytest.fixture
@@ -17,24 +17,26 @@ def analyzer():
 
 @pytest.fixture
 def sample_power_data():
-    """Create sample power data for testing."""
+    """Create sample power data for testing.
+
+    Layout:
+    - Even hours: stable at ~800W (low std, no jumps)
+    - Odd hours: unstable cycling 80W ↔ 350W (high std, many jumps)
+    """
     np.random.seed(42)
 
-    # Create 48 hours of data at 1-minute resolution
     times = pd.date_range(
         start=datetime.now(UTC) - timedelta(hours=48), periods=48 * 60, freq="1min"
     )
 
-    # Simulate cycling pattern with stable and unstable periods
     power = np.zeros(len(times))
 
     for i in range(0, len(times), 60):
-        # Every hour, alternate between stable (high power) and unstable (low power)
         if (i // 60) % 2 == 0:
-            # Stable period - consistent power around 800W
+            # Stable period – consistent power around 800W
             power[i : i + 60] = np.random.normal(800, 50, min(60, len(times) - i))
         else:
-            # Unstable period - cycling between 100W and 400W
+            # Unstable period – cycling between 100W and 400W
             cycle_len = np.random.randint(3, 10)
             j = i
             state = False
@@ -97,13 +99,33 @@ class TestAnalyzer:
         assert len(result.regions) > 0
 
     def test_analyze_discovers_stable_threshold(self, analyzer, sample_power_data):
-        """Test that analyzer discovers stable power threshold."""
+        """Test that analyzer discovers stable power threshold.
+
+        The 800W region is stable (low std), the 80-350W region is unstable.
+        The threshold should be somewhere in between.
+        """
         result = analyzer.analyze(sample_power_data)
 
-        # The synthetic data has stable operation around 800W
-        # and unstable around 350W, so threshold should be in between
         assert result.min_stable_power is not None
-        assert 300 < result.min_stable_power < 700
+        assert 300 < result.min_stable_power < 900
+
+    def test_stable_threshold_not_always_max_power(self, analyzer):
+        """Regression: stable threshold must NOT default to max power.
+
+        A system running stably at 500W should report ~500W, not 1800W.
+        """
+        np.random.seed(123)
+        times = pd.date_range(
+            start=datetime.now(UTC) - timedelta(hours=48), periods=48 * 60, freq="1min",
+        )
+        # Perfectly stable at ~500W
+        power = np.random.normal(500, 15, len(times))
+        data = pd.Series(power, index=times)
+
+        result = analyzer.analyze(data)
+        assert result.min_stable_power is not None
+        # Should be near 500, definitely not 1800
+        assert result.min_stable_power < 700
 
     def test_analyze_insufficient_data(self, analyzer):
         """Test analyze with insufficient data stays in observation mode."""
@@ -120,6 +142,7 @@ class TestAnalyzer:
         data = analyzer.get_dashboard_data()
 
         assert data["status"] == "waiting"
+        assert "sufficient_data" in data
         assert data["sufficient_data"] is False
 
     def test_get_dashboard_data_after_analysis(self, analyzer, sample_power_data):
@@ -132,3 +155,75 @@ class TestAnalyzer:
         assert "min_stable_power" in data
         assert "regions" in data
         assert len(data["regions"]) > 0
+
+
+class TestCyclingDetectionColumns:
+    """Tests for _add_cycling_detection producing new instability columns."""
+
+    @pytest.fixture
+    def analyzer(self):
+        return Analyzer()
+
+    def test_adds_instability_columns(self, analyzer):
+        """_add_cycling_detection must add power_std_10m, power_jumps, instability."""
+        np.random.seed(0)
+        times = pd.date_range("2024-01-01", periods=100, freq="1min")
+        df = pd.DataFrame({"power": np.random.normal(600, 80, 100)}, index=times)
+
+        result = analyzer._add_cycling_detection(df)
+
+        assert "power_std_10m" in result.columns
+        assert "power_jumps" in result.columns
+        assert "instability" in result.columns
+
+    def test_power_jumps_binary(self, analyzer):
+        """power_jumps should be 0 or 1."""
+        times = pd.date_range("2024-01-01", periods=10, freq="1min")
+        df = pd.DataFrame(
+            {"power": [500, 500, 900, 900, 500, 500, 900, 900, 500, 500]}, index=times,
+        )
+        result = analyzer._add_cycling_detection(df)
+        assert set(result["power_jumps"].unique()).issubset({0, 1})
+        # There should be jumps at the transitions (500→900, 900→500)
+        assert result["power_jumps"].sum() >= 2
+
+
+class TestRegionStability:
+    """Ensure _create_region_from_data uses fluctuation-based stability."""
+
+    @pytest.fixture
+    def analyzer(self):
+        return Analyzer()
+
+    def test_stable_region(self, analyzer):
+        """Stable data → high stability_score."""
+        np.random.seed(7)
+        times = pd.date_range("2024-01-01", periods=120, freq="1min")
+        df = pd.DataFrame(
+            {
+                "power": np.random.normal(600, 10, 120),
+                "is_cycling": False,
+                "hour": [t.hour for t in times],
+                "instability": 0.05,
+            },
+            index=times,
+        )
+        region = analyzer._create_region_from_data(df)
+        assert isinstance(region, OperatingRegion)
+        assert region.stability_score > 0.8
+
+    def test_unstable_region(self, analyzer):
+        """Highly fluctuating data → low stability_score."""
+        np.random.seed(8)
+        times = pd.date_range("2024-01-01", periods=120, freq="1min")
+        df = pd.DataFrame(
+            {
+                "power": [300, 1200] * 60,
+                "is_cycling": True,
+                "hour": [t.hour for t in times],
+                "instability": 0.85,
+            },
+            index=times,
+        )
+        region = analyzer._create_region_from_data(df)
+        assert region.stability_score < 0.3

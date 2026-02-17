@@ -37,7 +37,7 @@ Ein selbstlernendes Home Assistant Tool, das Multi-Split Klimaanlagen so steuert
   - Außentemperatur
   - Lüfterstufen
   - Aktive Geräte
-  - Kompressor-Status (aus Power abgeleitet)
+  - Kompressor-Status (aus Power abgeleitet, zu erkennen an häufigen wechsel von der Energieaufnahme)
 
 ### 2. Predictor (Vorhersage)
 - ML-Modell: Vorhersage von Takten
@@ -148,10 +148,10 @@ climatiq:
 
 ### Entities die erstellt werden
 - `sensor.climatiq_status` - Aktueller Zustand
-- `sensor.hvac_cycling_risk` - Takt-Risiko (0-100%)
-- `sensor.hvac_efficiency_score` - Effizienz-Score
+- `sensor.climatiq_cycling_risk` - Takt-Risiko (0-100%)
+- `sensor.climatiq_efficiency_score` - Effizienz-Score
 - `switch.climatiq_enabled` - An/Aus
-- `number.hvac_target_power` - Ziel-Mindestleistung
+- `number.climatiq_target_power` - Ziel-Mindestleistung
 
 ## Sicherheit
 

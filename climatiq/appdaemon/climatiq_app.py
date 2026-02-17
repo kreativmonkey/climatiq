@@ -359,7 +359,7 @@ class ClimatIQ(hass.Hass):
             result = self.predictor.train(df)
 
             if result.get("success"):
-                self.log(f"Model trained. F1 Score: {result['metrics']['f1_score']:.3f}")
+                self.log(f"Model trained. F1 Score: {result['metrics']['f1_mean']:.3f}")
 
                 # Switch to active mode
                 if self.observer.status.mode == SystemMode.LEARNING:

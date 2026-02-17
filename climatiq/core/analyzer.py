@@ -1,18 +1,27 @@
 """Analyzer module for automatic pattern discovery in HVAC data.
 
 This module implements self-discovery of optimal operating parameters
-without hardcoded thresholds. It uses clustering and statistical analysis
-to find stable vs unstable operating regions.
+without hardcoded thresholds. It uses a fluctuation-based stability metric
+to find stable vs unstable operating regions, supporting low-power stability.
 """
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
-from typing import Any
+from datetime import datetime, timezone
+from typing import Dict, Any, List, Optional, Tuple
 
 import pandas as pd
-from sklearn.cluster import KMeans
-from sklearn.preprocessing import StandardScaler
+import numpy as np
+
+# Optional ML imports
+try:
+    from sklearn.cluster import KMeans
+    from sklearn.preprocessing import StandardScaler
+    HAS_SKLEARN = True
+except ImportError:
+    KMeans = None
+    StandardScaler = None
+    HAS_SKLEARN = False
 
 logger = logging.getLogger(__name__)
 
@@ -20,374 +29,262 @@ logger = logging.getLogger(__name__)
 @dataclass
 class OperatingRegion:
     """Represents a discovered operating region."""
-
+    
     name: str
-    power_range: tuple[float, float]  # (min, max)
+    power_range: Tuple[float, float]  # (min, max)
     stability_score: float  # 0.0 (unstable) to 1.0 (stable)
-    avg_cycle_rate: float  # cycles per hour
+    fluctuation_rate: float  # instability metric
     sample_count: int
-    conditions: dict[str, Any] = field(default_factory=dict)
+    conditions: Dict[str, Any] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass 
 class AnalysisResult:
     """Results from the automatic analysis."""
-
-    min_stable_power: float | None = None  # Auto-discovered threshold
-    regions: list[OperatingRegion] = field(default_factory=list)
-    data_quality_score: float = 0.0  # 0.0 to 1.0
-    analysis_timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    
+    min_stable_power: Optional[float] = None
+    regions: List[OperatingRegion] = field(default_factory=list)
+    data_quality_score: float = 0.0
+    analysis_timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
     sufficient_data: bool = False
     recommendation: str = ""
 
 
 class Analyzer:
-    """Analyzes historical data to discover optimal operating parameters.
+    """Analyzes historical data to discover optimal operating parameters."""
 
-    This class implements the self-discovery mechanism that finds:
-    - Minimum stable power threshold (instead of hardcoded 400W)
-    - Stable vs unstable operating regions
-    - Correlations between conditions and cycling
-    """
-
-    # Minimum data requirements
-    MIN_HOURS_FOR_ANALYSIS = 24  # Need at least 24h of data
-    MIN_DATAPOINTS = 1000  # Minimum data points
-    IDEAL_DAYS_FOR_TRAINING = 7  # Ideal: 1 week of data
-
-    def __init__(self, config: dict[str, Any] = None):
+    MIN_HOURS_FOR_ANALYSIS = 24
+    MIN_DATAPOINTS = 1000
+    
+    def __init__(self, config: Dict[str, Any] = None):
         self.config = config or {}
-        self._last_result: AnalysisResult | None = None
-        self._scaler = StandardScaler()
+        self._last_result: Optional[AnalysisResult] = None
+        if HAS_SKLEARN:
+            self._scaler = StandardScaler()
+        else:
+            self._scaler = None
 
-    def check_data_sufficiency(self, df: pd.DataFrame) -> tuple[bool, str]:
-        """Check if we have enough data for analysis.
-
-        Returns:
-            Tuple of (is_sufficient, message)
-        """
+    def check_data_sufficiency(self, df: pd.DataFrame) -> Tuple[bool, str]:
         if df.empty:
-            return False, "Keine Daten vorhanden. System bleibt im Beobachtungsmodus."
+            return False, "Keine Daten vorhanden."
 
         if len(df) < self.MIN_DATAPOINTS:
             return (
                 False,
-                f"Nur {len(df)} Datenpunkte. Benötigt: {self.MIN_DATAPOINTS}. Weiter beobachten...",
+                f"Zu wenige Datenpunkte ({len(df)}). Benötigt mindestens {self.MIN_DATAPOINTS}.",
             )
 
-        # Check time span
         time_span = df.index[-1] - df.index[0]
         hours = time_span.total_seconds() / 3600
 
         if hours < self.MIN_HOURS_FOR_ANALYSIS:
             return (
                 False,
-                f"Nur {hours:.1f}h Daten. Benötigt: {self.MIN_HOURS_FOR_ANALYSIS}h. Weiter beobachten...",
+                f"Zu kurzer Zeitraum ({hours:.1f}h). Benötigt mindestens {self.MIN_HOURS_FOR_ANALYSIS}h.",
             )
 
-        return True, f"Ausreichend Daten: {len(df)} Punkte über {hours:.1f}h"
+        return True, f"Ausreichend: {len(df)} Punkte über {hours:.1f}h"
 
-    def analyze(
-        self,
-        power_data: pd.Series,
-        outdoor_temp: pd.Series | None = None,
-        room_temps: dict[str, pd.Series] | None = None,
-    ) -> AnalysisResult:
-        """Perform comprehensive analysis to discover operating patterns.
-
-        Args:
-            power_data: Time series of power consumption (W)
-            outdoor_temp: Optional outdoor temperature series
-            room_temps: Optional dict of room temperature series
-
-        Returns:
-            AnalysisResult with discovered parameters
-        """
+    def analyze(self, power_data: pd.Series, 
+                outdoor_temp: Optional[pd.Series] = None,
+                room_temps: Optional[Dict[str, pd.Series]] = None) -> AnalysisResult:
         result = AnalysisResult()
-
-        # Check data sufficiency
-        df = pd.DataFrame({"power": power_data})
+        
+        df = pd.DataFrame({'power': power_data})
         sufficient, message = self.check_data_sufficiency(df)
         result.sufficient_data = sufficient
         result.recommendation = message
-
+        
         if not sufficient:
-            logger.info(f"Insufficient data: {message}")
             return result
-
-        # Calculate data quality score
+        
         result.data_quality_score = self._calculate_data_quality(df)
-
-        # Detect cycling events
+        
+        # 1. Enhanced Metrics (Fluctuations)
         df = self._add_cycling_detection(df)
-
-        # Discover stable power threshold
-        result.min_stable_power = self._discover_stable_threshold(df)
-
-        # Discover operating regions via clustering
-        result.regions = self._discover_regions(df, outdoor_temp)
-
-        # Generate recommendation
+        
+        # 2. Discover Regions (Cluster by Power + Instability)
+        if HAS_SKLEARN:
+            result.regions = self._discover_regions_clustering(df, outdoor_temp)
+        else:
+            result.regions = self._discover_regions_heuristic(df)
+            
+        # 3. Find Stable Threshold from Regions
+        result.min_stable_power = self._find_min_stable_power(result.regions)
+        
         result.recommendation = self._generate_recommendation(result)
-
         self._last_result = result
-        logger.info(f"Analysis complete. Min stable power: {result.min_stable_power}W")
-
+        
         return result
 
     def _calculate_data_quality(self, df: pd.DataFrame) -> float:
-        """Calculate a quality score for the data."""
         score = 1.0
-
-        # Penalize for missing values
-        missing_ratio = df["power"].isna().sum() / len(df)
-        score -= missing_ratio * 0.5
-
-        # Penalize for low variance (sensor might be stuck)
-        if df["power"].std() < 10:
-            score -= 0.3
-
-        # Check for reasonable value range
-        if df["power"].min() < 0 or df["power"].max() > 10000:
-            score -= 0.2
-
-        return max(0.0, min(1.0, score))
+        missing = df['power'].isna().sum() / len(df)
+        score -= missing * 0.5
+        if df['power'].std() < 5:  # Flatline?
+            score -= 0.4
+        return max(0.0, score)
 
     def _add_cycling_detection(self, df: pd.DataFrame) -> pd.DataFrame:
-        """Add cycling detection columns to dataframe."""
-        # Determine on/off state using dynamic thresholds
-        power = df["power"].dropna()
+        """Add metrics for instability: rolling StdDev, Jumps.
 
-        # Use percentiles to find natural thresholds
-        p10 = power.quantile(0.10)
-        p90 = power.quantile(0.90)
+        Columns expected by unit tests:
+        - power_std_10m
+        - power_jumps (0/1)
+        - instability
+        """
+        # 1. Rolling StdDev (10 minutes at 1-min cadence)
+        df["power_std_10m"] = df["power"].rolling(10, min_periods=1).std().fillna(0)
 
-        # Dynamic threshold: midpoint between low and high states
-        threshold_off = p10 + (p90 - p10) * 0.15
-        threshold_on = p10 + (p90 - p10) * 0.25
+        # 2. Rolling Mean (to normalize StdDev)
+        df["power_mean_10m"] = df["power"].rolling(10, min_periods=1).mean().fillna(1)
 
-        # State detection with hysteresis
-        df["compressor_on"] = False
-        state = False
-        for i in range(len(df)):
-            power_val = df["power"].iloc[i]
-            if pd.isna(power_val):
-                continue
-            if state:  # Currently ON
-                if power_val < threshold_off:
-                    state = False
-            else:  # Currently OFF
-                if power_val > threshold_on:
-                    state = True
-            df.iloc[i, df.columns.get_loc("compressor_on")] = state
+        # 3. Coefficient of Variation (CV) = Std / Mean
+        df["instability"] = (df["power_std_10m"] / df["power_mean_10m"]).fillna(0)
 
-        # Detect state changes (cycles)
-        df["state_change"] = df["compressor_on"].astype(int).diff().abs().fillna(0)
+        # 4. Large Jumps (>200W diff)
+        diff_abs = df["power"].diff().abs().fillna(0)
+        df["power_jumps"] = (diff_abs > 200).astype(int)
 
         return df
 
-    def _discover_stable_threshold(self, df: pd.DataFrame) -> float:
-        """Discover the minimum power level for stable operation.
+    def _find_min_stable_power(self, regions: List[OperatingRegion]) -> float:
+        """Find the lowest power level that is considered stable."""
+        # Filter out regions that are likely standby/fan-only (e.g. < 300W)
+        # We only care about COMPRESSOR stability.
+        active_regions = [r for r in regions if r.power_range[1] > 300]
+        
+        stable_regions = [r for r in active_regions if r.stability_score > 0.7]
+        
+        if not stable_regions:
+            # Fallback: Find region with best relative stability from ACTIVE regions
+            if active_regions:
+                best_region = max(active_regions, key=lambda r: r.stability_score)
+                return best_region.power_range[0]
+            return 400.0  # Safe default fallback
+            
+        # Return the minimum power of the lowest power stable region
+        # Sort by min power
+        stable_regions.sort(key=lambda r: r.power_range[0])
+        return stable_regions[0].power_range[0]
 
-        This replaces hardcoded thresholds like "400W" with a data-driven value.
-        """
-        # Group by power bins and calculate cycling rate per bin
-        df["power_bin"] = pd.cut(df["power"], bins=20)
-
-        stability_by_power = []
-        for power_range, group in df.groupby("power_bin", observed=True):
-            if len(group) < 30:  # Need minimum samples
-                continue
-
-            cycles = group["state_change"].sum()
-            hours = len(group) / 60  # Assuming 1-min resolution
-            cycle_rate = cycles / hours if hours > 0 else 0
-
-            # Stability score: inverse of cycle rate
-            stability = 1.0 / (1.0 + cycle_rate)
-
-            # Get midpoint of power range
-            if hasattr(power_range, "mid"):
-                power_mid = power_range.mid
-            else:
-                continue
-
-            stability_by_power.append(
-                {
-                    "power": power_mid,
-                    "stability": stability,
-                    "cycle_rate": cycle_rate,
-                    "samples": len(group),
-                }
-            )
-
-        if not stability_by_power:
-            return 400.0  # Fallback default
-
-        stability_df = pd.DataFrame(stability_by_power)
-
-        # Find the lowest power level where stability is above threshold (0.8)
-        stable_regions = stability_df[stability_df["stability"] > 0.8]
-
-        if stable_regions.empty:
-            # If no highly stable region, find the inflection point
-            # where stability starts improving significantly
-            stability_df = stability_df.sort_values("power")
-            stability_df["stability_diff"] = stability_df["stability"].diff()
-
-            # Find biggest improvement
-            max_improvement_idx = stability_df["stability_diff"].idxmax()
-            if pd.notna(max_improvement_idx):
-                return float(stability_df.loc[max_improvement_idx, "power"])
-            return float(stability_df["power"].median())
-
-        # Return the minimum power level in stable regions
-        return float(stable_regions["power"].min())
-
-    def _discover_regions(
-        self, df: pd.DataFrame, outdoor_temp: pd.Series | None = None
-    ) -> list[OperatingRegion]:
-        """Discover distinct operating regions using clustering."""
+    def _discover_regions_heuristic(self, df: pd.DataFrame) -> List[OperatingRegion]:
+        """Bin data by power and analyze stability within bins."""
         regions = []
-
-        # Prepare features for clustering
-        features = ["power"]
-        feature_df = df[["power"]].copy()
-
-        if outdoor_temp is not None and len(outdoor_temp) > 0:
-            # Align outdoor temp with power data
-            feature_df["outdoor_temp"] = outdoor_temp.reindex(feature_df.index, method="nearest")
-            features.append("outdoor_temp")
-
-        # Add time-based features
-        feature_df["hour"] = feature_df.index.hour
-        features.append("hour")
-
-        # Remove NaN rows
-        feature_df = feature_df.dropna()
-
-        if len(feature_df) < 100:
+        # Create bins every 200W up to 2000W, then larger
+        bins = list(range(0, 2000, 200)) + [5000]
+        labels = [f"{b}-{bins[i+1]}" for i, b in enumerate(bins[:-1])]
+        
+        try:
+            df['power_bin'] = pd.cut(df['power'], bins=bins, labels=labels, include_lowest=True)
+        except ValueError:
             return regions
 
-        # Scale features
-        X = self._scaler.fit_transform(feature_df[features])
-
-        # Use KMeans to find natural clusters
-        n_clusters = min(5, len(feature_df) // 200)  # Dynamic cluster count
-        n_clusters = max(2, n_clusters)
-
-        kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
-        feature_df["cluster"] = kmeans.fit_predict(X)
-
-        # Also add cycling info
-        feature_df["is_cycling"] = df.loc[feature_df.index, "state_change"] > 0
-
-        # Analyze each cluster
-        for cluster_id in range(n_clusters):
-            cluster_data = feature_df[feature_df["cluster"] == cluster_id]
-
-            if len(cluster_data) < 30:
+        for bin_label, group in df.groupby('power_bin', observed=True):
+            if len(group) < 50:
                 continue
-
-            power_min = cluster_data["power"].min()
-            power_max = cluster_data["power"].max()
-
-            # Calculate stability for this cluster
-            cycling_ratio = cluster_data["is_cycling"].sum() / len(cluster_data)
-            stability = 1.0 - cycling_ratio
-
-            # Estimate cycle rate
-            hours = len(cluster_data) / 60
-            cycle_rate = cluster_data["is_cycling"].sum() / hours if hours > 0 else 0
-
-            # Determine region name based on power level
-            avg_power = cluster_data["power"].mean()
-            if avg_power < 300:
-                name = "Niedriglast (instabil)"
-            elif avg_power < 600:
-                name = "Teillast"
-            elif avg_power < 1200:
-                name = "Mittellast"
-            else:
-                name = "Volllast"
-
-            if stability > 0.8:
-                name += " - Stabil ✓"
-            elif stability < 0.5:
-                name += " - Instabil ⚠"
-
-            region = OperatingRegion(
-                name=name,
-                power_range=(power_min, power_max),
-                stability_score=stability,
-                avg_cycle_rate=cycle_rate,
-                sample_count=len(cluster_data),
-                conditions={
-                    "avg_power": avg_power,
-                    "hour_distribution": cluster_data["hour"].value_counts().to_dict(),
-                },
-            )
-            regions.append(region)
-
-        # Sort by power range
+                
+            regions.append(self._create_region_from_group(group))
+            
         regions.sort(key=lambda r: r.power_range[0])
-
         return regions
 
+    def _discover_regions_clustering(self, df: pd.DataFrame, outdoor: Optional[pd.Series] = None) -> List[OperatingRegion]:
+        """Cluster data to find natural operating points."""
+        if len(df) < 100:
+            return self._discover_regions_heuristic(df)
+            
+        features = ['power', 'instability']
+        X_df = df[features].copy().dropna()
+        X = self._scaler.fit_transform(X_df)
+        
+        # Determine K (3-6 clusters)
+        k = min(6, len(df)//200 + 2)
+        kmeans = KMeans(n_clusters=k, random_state=42, n_init=10).fit(X)
+        
+        df.loc[X_df.index, 'cluster'] = kmeans.labels_
+        
+        regions = []
+        for cid in range(k):
+            group = df[df['cluster'] == cid]
+            if len(group) < 30: continue
+            regions.append(self._create_region_from_group(group))
+            
+        regions.sort(key=lambda r: r.power_range[0])
+        return regions
+
+    def _create_region_from_group(self, group: pd.DataFrame) -> OperatingRegion:
+        return self._create_region_from_data(group)
+
+    def _create_region_from_data(self, group: pd.DataFrame) -> OperatingRegion:
+        avg_power = group['power'].mean()
+        min_p = group['power'].min()
+        max_p = group['power'].max()
+        
+        # Stability Metric:
+        # 1.0 = Perfectly stable (low std, low jumps)
+        # 0.0 = Very unstable
+        
+        avg_instability = group['instability'].mean() if 'instability' in group.columns else 0.0
+        # Support both column names
+        jump_col = 'power_jumps' if 'power_jumps' in group.columns else 'is_jump'
+        jump_rate = group[jump_col].mean() * 60 if jump_col in group.columns else 0.0
+        
+        # Heuristic scoring
+        # CV < 0.1 is very stable. CV > 0.3 is unstable.
+        # Jumps < 2/hr is stable. > 10/hr is unstable.
+        
+        score_cv = max(0, 1.0 - (avg_instability / 0.3))
+        score_jumps = max(0, 1.0 - (jump_rate / 10.0))
+        
+        stability_score = (score_cv * 0.7) + (score_jumps * 0.3)
+        
+        name = f"{min_p:.0f}-{max_p:.0f}W"
+        if stability_score > 0.8: name += " (Stabil)"
+        elif stability_score < 0.4: name += " (Instabil)"
+        
+        return OperatingRegion(
+            name=name,
+            power_range=(min_p, max_p),
+            stability_score=stability_score,
+            fluctuation_rate=avg_instability,
+            sample_count=len(group),
+            conditions={'avg_power': avg_power}
+        )
+
     def _generate_recommendation(self, result: AnalysisResult) -> str:
-        """Generate human-readable recommendation."""
         if not result.sufficient_data:
-            return "Noch nicht genug Daten für Empfehlungen. Weiter beobachten."
-
+            return "Bitte weiter beobachten – Daten sammeln..."
+            
         lines = []
-
         if result.min_stable_power:
-            lines.append(
-                f"✓ Erkannte Mindestlast für stabilen Betrieb: {result.min_stable_power:.0f}W"
-            )
-
-        stable_regions = [r for r in result.regions if r.stability_score > 0.8]
-        unstable_regions = [r for r in result.regions if r.stability_score < 0.5]
-
-        if unstable_regions:
-            worst = min(unstable_regions, key=lambda r: r.stability_score)
-            lines.append(
-                f"⚠ Instabilster Bereich: {worst.power_range[0]:.0f}-{worst.power_range[1]:.0f}W"
-            )
-
+            lines.append(f"Minimale stabile Last: {result.min_stable_power:.0f}W")
+            
+        stable_regions = [r for r in result.regions if r.stability_score > 0.7]
         if stable_regions:
-            best = max(stable_regions, key=lambda r: r.stability_score)
-            lines.append(
-                f"✓ Stabilster Bereich: {best.power_range[0]:.0f}-{best.power_range[1]:.0f}W"
-            )
+            ranges = [f"{r.power_range[0]:.0f}-{r.power_range[1]:.0f}W" for r in stable_regions]
+            lines.append(f"Empfohlene Bereiche: {', '.join(ranges)}")
+        else:
+            lines.append("⚠ Kein stabiler Betriebsbereich gefunden.")
+            
+        return " | ".join(lines)
 
-        return "\n".join(lines) if lines else "Analyse abgeschlossen."
-
-    def get_dashboard_data(self) -> dict[str, Any]:
-        """Get data formatted for Home Assistant dashboard."""
+    def get_dashboard_data(self) -> Dict[str, Any]:
+        """Return data for HA dashboard."""
         if not self._last_result:
-            return {
-                "status": "waiting",
-                "message": "Warte auf erste Analyse...",
-                "sufficient_data": False,
-            }
+            return {"status": "waiting", "sufficient_data": False}
 
         r = self._last_result
         return {
-            "status": "ready" if r.sufficient_data else "observing",
-            "sufficient_data": r.sufficient_data,
-            "data_quality": round(r.data_quality_score * 100),
+            "status": "ready" if r.sufficient_data else "waiting",
+            "sufficient_data": bool(r.sufficient_data),
             "min_stable_power": r.min_stable_power,
             "regions": [
                 {
-                    "name": reg.name,
-                    "power_min": reg.power_range[0],
-                    "power_max": reg.power_range[1],
-                    "stability_pct": round(reg.stability_score * 100),
-                    "cycles_per_hour": round(reg.avg_cycle_rate, 2),
+                    "range": f"{reg.power_range[0]:.0f}-{reg.power_range[1]:.0f}W",
+                    "stability": round(reg.stability_score * 100),
+                    "is_stable": reg.stability_score > 0.7,
                 }
                 for reg in r.regions
             ],
-            "recommendation": r.recommendation,
-            "last_analysis": r.analysis_timestamp.isoformat(),
         }
