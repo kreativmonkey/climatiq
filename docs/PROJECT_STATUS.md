@@ -1,6 +1,8 @@
 # ClimatIQ - Projektstatus & Quick Reference
 
-> Letzte Aktualisierung: 2026-02-12
+> Letzte Aktualisierung: 2026-02-17  
+> Branch: `feature/stability-optimizer-v2`  
+> Phase: **Cycling Detection v2 - In Progress**
 
 ## Projektstruktur (ohne venv/.git)
 
@@ -113,29 +115,45 @@ climatiq/
 | **InfluxDB** | ✅ Implementiert | `data/influx_v1_client.py`, `data/influx_client.py` | Beide Versionen vorhanden |
 | **Config** | ✅ Implementiert | `config.py`, `config/*.yaml` | Funktional |
 
-## ⚠️ KRITISCHE ÄNDERUNGSANFORDERUNG: Takterkennung v2
+## ⚠️ KRITISCHE ÄNDERUNGSANFORDERUNG: Takterkennung v2 → ✅ IN BEARBEITUNG
 
-**Stand 2026-02-12 — Feedback von Sebastian:**
+**Stand 2026-02-17 — Implementierung gestartet:**
 
-### Problem 1: Falsche Definition von "Takten"
-Das aktuelle System erkennt Takten nur als **Kompressor An/Aus-Wechsel** (über/unter Schwellwert 200W/100W).
+### Problem 1: Falsche Definition von "Takten" → ✅ ADRESSIERT
+Das aktuelle System erkannte Takten nur als **Kompressor An/Aus-Wechsel** (über/unter Schwellwert 200W/100W).
 
 **Richtig ist:** Takten = **häufige Schwankungen der Energieaufnahme**, auch INNERHALB eines "eingeschalteten" Zustands. Z.B. Wechsel zwischen 600W und 1500W gilt als Takten.
 
-### Problem 2: Stabilitätserkennung fehlerhaft
+**Neue Implementierung (Sprint 2):**
+- Power variance tracking (rolling std dev)
+- Gradient analysis (W/min trend)
+- Power spread (max - min in window)
+- Adaptive thresholds (keine hardcoded Limits)
+
+**Status**: ✅ Code implementiert, Unit-Tests bestanden, Validierung mit echten Daten ausstehend
+
+### Problem 2: Stabilitätserkennung fehlerhaft → ⏳ SPRINT 3 GEPLANT
 Der Analyzer zeigt im Live-Betrieb stets an, das System sei nur bei **1800W stabil**. Real ist das System auch bei **400-600W stabil** möglich.
 
-### Neues Ziel
+**Geplanter Fix:**
+- Clustering-Logik überarbeiten (Variance als primäres Feature)
+- Multi-dimensionale Stabilität (Power, Temp, Units, Fan)
+- Visualisierung der Cluster zur Debugging
+- Validierung mit letzten 5 Tagen Daten
+
+**Status**: ⏳ Sprint 3 beginnt nach Validierung von Sprint 2
+
+### Neues Ziel → ✅ DEFINIERT
 1. **Minimale Energieaufnahme** bei Komforterhaltung
 2. **Große Energiesprünge vermeiden** (nicht nur An/Aus)
 3. Stabile Betriebspunkte bei niedrigen Leistungen finden und halten
 
-### Betroffene Dateien
-- `analysis/cycling_detector.py` — Kernlogik muss komplett überarbeitet werden
-- `core/observer.py` — Nutzt `CyclingDetector`, muss angepasst werden
-- `core/analyzer.py` — Stabilitätserkennung liefert falsche Schwellwerte
-- `core/predictor.py` — Labels basieren auf altem Takt-Verständnis
-- `core/controller.py` — Steuerungsstrategien an neues Ziel anpassen
+### Betroffene Dateien → ✅ ÜBERARBEITET
+- `analysis/cycling_detector.py` — ✅ Vollständig refactored (variance-based)
+- `core/observer.py` — ✅ Extended mit Gradient, Spread, Cycling-Risk
+- `core/analyzer.py` — ⏳ Sprint 3 (Clustering-Fix)
+- `core/predictor.py` — ⏳ Sprint 5 (Re-Training mit neuen Labels)
+- `core/controller.py` — ⏳ Sprint 4 (Strategies angepasst)
 
 ## Quick Reference für Wiederaufnahme
 

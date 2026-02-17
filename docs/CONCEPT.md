@@ -1,7 +1,16 @@
 # ClimatIQ - Konzept
 
+> **Version 2.0** - Überarbeitet 2026-02-17  
+> Branch: `feature/stability-optimizer-v2`
+
 ## Ziel
-Ein selbstlernendes Home Assistant Tool, das Multi-Split Klimaanlagen so steuert, dass **Kompressor-Takten vermieden** wird, während die **Komforttemperatur** gehalten wird.
+Ein selbstlernendes Home Assistant Tool, das Multi-Split Klimaanlagen so steuert, dass **Leistungsschwankungen (Takten) vermieden** werden, während die **Komforttemperatur** bei **minimaler stabiler Energieaufnahme** gehalten wird.
+
+### Kernprinzipien (v2)
+1. **Stabilität über alles**: Gleichmäßiger Betrieb schlägt kurzfristige "Effizienz"
+2. **Minimale Energie bei Stabilität**: Niedrigste Leistungsaufnahme mit geringer Varianz
+3. **Lernen aus Daten**: System-spezifische Schwellwerte, keine hardcoded Annahmen
+4. **Proaktive Anpassung**: Probleme vermeiden, bevor sie auftreten
 
 ## Architektur
 
@@ -29,62 +38,98 @@ Ein selbstlernendes Home Assistant Tool, das Multi-Split Klimaanlagen so steuert
 
 ## Komponenten
 
-### 1. Observer (Beobachter)
-- Überwacht Stromverbrauch in Echtzeit
-- Erkennt Takten (schnelle An/Aus-Wechsel)
+### 1. Observer (Beobachter) - v2
+- Überwacht Stromverbrauch in Echtzeit mit **Power Variance Tracking**:
+  - **Power Mean**: Durchschnitt der letzten 5 Min
+  - **Power Std Dev**: Standardabweichung (Maß für Stabilität)
+  - **Power Gradient**: Trend (W/min) - steigend, fallend, stabil
+  - **Power Spread**: Max - Min in Zeitfenster
+  - **Cycling Risk**: 0-100% basierend auf Varianz-Metriken
+- Erkennt **Takten als Leistungsschwankungen**, nicht nur An/Aus
 - Sammelt Zustandsdaten:
   - Raumtemperaturen (Ist/Soll)
   - Außentemperatur
   - Lüfterstufen
   - Aktive Geräte
-  - Kompressor-Status (aus Power abgeleitet, zu erkennen an häufigen wechsel von der Energieaufnahme)
+  - Kompressor-Laufzeit (aus Power-History abgeleitet)
 
-### 2. Predictor (Vorhersage)
-- ML-Modell: Vorhersage von Takten
-- Input: Aktueller Zustand + Historie
-- Output: "Takten wahrscheinlich in X Minuten"
-- Trainiert auf historischen Daten aus InfluxDB
+### 2. Analyzer (Analyse) - v2 NEU
+- **Auto-Discovery stabiler Betriebsbereiche**:
+  - Clustering (DBSCAN / GMM) auf historischen Daten
+  - Features: Power Mean, Power Std Dev, Outdoor Temp, Active Units
+  - Ziel: Finde Zonen mit niedriger Varianz bei niedriger Leistung
+- **Adaptive Schwellwerte**: Keine festen 400W/1800W, lernt system-spezifisch
+- **Multi-dimensionale Stabilität**: (Power, Temp, Units, Fan) Kombinationen
+- Output: Liste stabiler Betriebspunkte mit Parametern
 
-### 3. Controller (Steuerung)
-- Entscheidet Aktionen basierend auf Vorhersage
-- Strategien:
-  - **Load Balancing**: Mehr Geräte aktivieren
-  - **Temperature Shift**: Solltemperatur anpassen
-  - **Fan Control**: Lüfterstufe reduzieren
-  - **Preemptive Heating**: Puffer-Raum vorheizen
+### 3. Predictor (Vorhersage) - v2
+- ML-Modell: RandomForest Classifier
+- Input: Power-Statistiken (mean, std, gradient), Temperaturen, Tageszeit, aktive Geräte
+- Output: Cycling Risk (0-100%), Wahrscheinlichkeit in nächsten 10 Min
+- Trainiert auf historischen Daten mit **neuer Takt-Definition** (Varianz-basiert)
+- Fallback: Heuristische Regeln wenn ML nicht verfügbar
 
-### 4. Learner (Lernender)
-- Bewertet Erfolg der Aktionen
-- Passt Strategie-Parameter an
-- Reinforcement Learning Ansatz
+### 4. Controller (Steuerung) - v2
+- Entscheidet Aktionen basierend auf Vorhersage + Analyzer-Zonen
+- Strategien (verfeinert):
+  - **Load Balancing**: Aktiviere Geräte um in stabile Zone zu kommen
+  - **Temperature Modulation**: Kleinere Schritte (±0.3°C), sanft
+  - **Fan Control**: Graduell anpassen, keine Sprünge
+  - **Preemptive Buffering**: Puffer-Räume vor Risiko-Peak aktivieren
+  - **Night Mode**: 23:00-07:00 niedrigere Temps, mehrere Geräte
+- **Safety**: Max ±1.5°C Abweichung, Min 5 Min zwischen Aktionen
+- **Hysteresis**: Nicht sofort zurückändern, Stabilität abwarten
+
+### 5. Learner (Lernender) - Future
+- Bewertet Erfolg der Aktionen (Outcome-Tracking)
+- Passt Strategie-Parameter an (Parameter-Tuning)
+- **Future**: Reinforcement Learning Agent (PPO/SAC)
+  - Reward: +1 pro Min stabil, -10 pro Takt-Event
+  - Safe Exploration mit Constraints
+  - Simulations-Training vor Live-Deployment
 
 ## Datenfluss
 
 ```
-1. OBSERVE
+1. OBSERVE (v2)
    │
-   ├── Power: 380W (niedrig, Takt-Gefahr!)
-   ├── Kompressor: AN seit 3 min
+   ├── Power: Mean 480W, Std Dev 120W (Schwankungen!)
+   ├── Gradient: +15 W/min (steigend)
+   ├── Spread: Max 650W, Min 350W (Δ=300W, instabil)
+   ├── Cycling Risk: 75% (hoch!)
    ├── Rooms: EG 21.8°C, SZ 22.1°C, AZ aus
    └── Outside: 4°C
    
-2. PREDICT
+2. ANALYZE
    │
-   └── "Takten in 2-4 min wahrscheinlich (85%)"
+   └── Stable Zone gefunden: 2 Geräte, 550-650W, Std Dev <30W
    
-3. DECIDE
+3. PREDICT
    │
+   └── ML Model: "Takten in 8 min wahrscheinlich (82%)"
+   
+4. DECIDE
+   │
+   ├── Strategie: Load Balancing → aktiviere AZ als Puffer
+   ├── Ziel: Power in stabile Zone 550-650W bringen
    └── Aktion: "Aktiviere AZ mit Soll 20°C, Fan LOW"
    
-4. ACT
+5. ACT
    │
    └── climate.set_temperature(az, 20)
        climate.set_fan_mode(az, "low")
    
-5. LEARN
+6. OBSERVE (nach 10 min)
    │
-   ├── Ergebnis nach 10 min: Kein Takten ✓
-   └── Update: Diese Aktion bei ähnlichem Zustand = gut
+   ├── Power: Mean 580W, Std Dev 25W (stabil! ✓)
+   ├── Gradient: -2 W/min (ausgeglichen)
+   ├── Cycling Risk: 15% (niedrig)
+   └── Ergebnis: Aktion erfolgreich, kein Takten
+   
+7. LEARN
+   │
+   ├── Outcome: Positiv (+1 Punkt)
+   └── Update: "Bei Power Std Dev >100W + 2 Geräte → +1 Gerät = gut"
 ```
 
 ## Lernansatz
@@ -187,9 +232,21 @@ climatiq:
 - [ ] Online-Lernen
 - [ ] Feintuning
 
-## Metriken für Erfolg
+## Metriken für Erfolg (v2)
 
-1. **Takt-Reduktion**: Zyklen/Tag sinken um >50%
-2. **Komfort**: Temperatur-Abweichung <0.5°C
-3. **Effizienz**: kWh/Grad-Tag verbessert sich
-4. **Kompressor-Laufzeit**: Längere, stabilere Zyklen
+### Primäre Ziele (Must-Have)
+1. **Takt-Reduktion**: <10 Takt-Events/Tag (Baseline: 50-100/Tag) = 90% Reduktion
+2. **Stabilität**: >80% der Betriebszeit mit Power Std Dev <50W
+3. **Komfort**: Temperatur-Abweichung <0.5°C RMS vom Sollwert
+4. **Minimale Energie**: 50%+ der stabilen Zeit bei <600W Leistung
+
+### Sekundäre Ziele (Nice-to-Have)
+1. **Kompressor-Laufzeit**: Durchschnittliche Zyklus-Länge >30 Min (Baseline: ~3 Min)
+2. **Interventionseffizienz**: <8 Steuerungsaktionen/Tag
+3. **Vorhersagegenauigkeit**: Cycling Risk Prediction F1 >0.70
+4. **Nutzerzufriedenheit**: <2 manuelle Overrides/Woche
+
+### Datenerfassung
+- **InfluxDB**: Alle 30s: Power, Temps, Actions, Outcomes
+- **Memory**: Daily Summary in `memory/YYYY-MM-DD.md`
+- **Models**: Training Metrics bei jedem Retrain
