@@ -33,7 +33,7 @@ class OperatingRegion:
     name: str
     power_range: Tuple[float, float]  # (min, max)
     stability_score: float  # 0.0 (unstable) to 1.0 (stable)
-    fluctuation_rate: float  # instability metric
+    fluctuation_rate: float  # instability metric (e.g. avg std dev)
     sample_count: int
     conditions: Dict[str, Any] = field(default_factory=dict)
 
@@ -127,20 +127,19 @@ class Analyzer:
 
     def _add_cycling_detection(self, df: pd.DataFrame) -> pd.DataFrame:
         """Add metrics for instability: rolling StdDev, Jumps.
-
-        Columns expected by unit tests:
-        - power_std_10m
-        - power_jumps (0/1)
-        - instability
+        
+        Optimized for v2: priorities absolute stability over relative variation.
         """
-        # 1. Rolling StdDev (10 minutes at 1-min cadence)
+        # 1. Rolling StdDev (10 minutes) - The primary stability metric
         df["power_std_10m"] = df["power"].rolling(10, min_periods=1).std().fillna(0)
 
-        # 2. Rolling Mean (to normalize StdDev)
+        # 2. Rolling Mean
         df["power_mean_10m"] = df["power"].rolling(10, min_periods=1).mean().fillna(1)
 
-        # 3. Coefficient of Variation (CV) = Std / Mean
-        df["instability"] = (df["power_std_10m"] / df["power_mean_10m"]).fillna(0)
+        # 3. Enhanced Instability Metric (v2)
+        # We use a mix of absolute and relative variance.
+        # Absolute variance is better for low-power stability detection.
+        df["instability"] = (df["power_std_10m"] / 50.0).clip(0, 1.0) # Penalty for every 50W of StdDev
 
         # 4. Large Jumps (>200W diff)
         diff_abs = df["power"].diff().abs().fillna(0)
@@ -150,22 +149,24 @@ class Analyzer:
 
     def _find_min_stable_power(self, regions: List[OperatingRegion]) -> float:
         """Find the lowest power level that is considered stable."""
-        # Filter out regions that are likely standby/fan-only (e.g. < 300W)
-        # We only care about COMPRESSOR stability.
+        # We only care about COMPRESSOR stability (usually > 300W)
         active_regions = [r for r in regions if r.power_range[1] > 300]
         
-        stable_regions = [r for r in active_regions if r.stability_score > 0.7]
+        # In v2, we are more lenient with stability score for low power
+        # if the absolute variance is low.
+        stable_regions = [r for r in active_regions if r.stability_score > 0.6]
         
         if not stable_regions:
-            # Fallback: Find region with best relative stability from ACTIVE regions
             if active_regions:
+                # Fallback to the most stable active region
                 best_region = max(active_regions, key=lambda r: r.stability_score)
-                return best_region.power_range[0]
-            return 400.0  # Safe default fallback
+                return max(400.0, best_region.power_range[0])
+            return 450.0 # Default compressor floor
             
-        # Return the minimum power of the lowest power stable region
-        # Sort by min power
-        stable_regions.sort(key=lambda r: r.power_range[0])
+        # Sort by average power (hidden in name or calculated from range)
+        stable_regions.sort(key=lambda r: (r.power_range[0] + r.power_range[1]) / 2)
+        
+        # Return the min power of the lowest stable region
         return stable_regions[0].power_range[0]
 
     def _discover_regions_heuristic(self, df: pd.DataFrame) -> List[OperatingRegion]:
@@ -194,12 +195,14 @@ class Analyzer:
         if len(df) < 100:
             return self._discover_regions_heuristic(df)
             
-        features = ['power', 'instability']
+        # In v2, we use power and the absolute std dev for clustering
+        # This helps separate "Stable 450W" from "Oscillating 450W"
+        features = ['power', 'power_std_10m']
         X_df = df[features].copy().dropna()
         X = self._scaler.fit_transform(X_df)
         
-        # Determine K (3-6 clusters)
-        k = min(6, len(df)//200 + 2)
+        # Use more clusters to separate low-power states more cleanly
+        k = min(8, len(df)//150 + 3)
         kmeans = KMeans(n_clusters=k, random_state=42, n_init=10).fit(X)
         
         df.loc[X_df.index, 'cluster'] = kmeans.labels_
@@ -207,7 +210,7 @@ class Analyzer:
         regions = []
         for cid in range(k):
             group = df[df['cluster'] == cid]
-            if len(group) < 30: continue
+            if len(group) < 20: continue # Smaller groups allowed in v2
             regions.append(self._create_region_from_group(group))
             
         regions.sort(key=lambda r: r.power_range[0])
@@ -221,35 +224,35 @@ class Analyzer:
         min_p = group['power'].min()
         max_p = group['power'].max()
         
-        # Stability Metric:
-        # 1.0 = Perfectly stable (low std, low jumps)
-        # 0.0 = Very unstable
+        # Stability Metric v2:
+        # We penalize absolute variance (StdDev) more than relative CV
+        # A StdDev of < 40W is excellent for low-power stability.
+        avg_std = group['power_std_10m'].mean() if 'power_std_10m' in group.columns else 100.0
         
-        avg_instability = group['instability'].mean() if 'instability' in group.columns else 0.0
-        # Support both column names
+        # Jump rate (per hour)
         jump_col = 'power_jumps' if 'power_jumps' in group.columns else 'is_jump'
         jump_rate = group[jump_col].mean() * 60 if jump_col in group.columns else 0.0
         
-        # Heuristic scoring
-        # CV < 0.1 is very stable. CV > 0.3 is unstable.
-        # Jumps < 2/hr is stable. > 10/hr is unstable.
+        # Scoring: 
+        # StdDev: 0W -> 1.0, 100W -> 0.0
+        score_std = max(0, 1.0 - (avg_std / 100.0))
+        # Jumps: 0/hr -> 1.0, 12/hr -> 0.0
+        score_jumps = max(0, 1.0 - (jump_rate / 12.0))
         
-        score_cv = max(0, 1.0 - (avg_instability / 0.3))
-        score_jumps = max(0, 1.0 - (jump_rate / 10.0))
+        # Weighted score (Stability focus)
+        stability_score = (score_std * 0.8) + (score_jumps * 0.2)
         
-        stability_score = (score_cv * 0.7) + (score_jumps * 0.3)
-        
-        name = f"{min_p:.0f}-{max_p:.0f}W"
-        if stability_score > 0.8: name += " (Stabil)"
-        elif stability_score < 0.4: name += " (Instabil)"
+        name = f"{avg_power:.0f}W avg ({min_p:.0f}-{max_p:.0f}W)"
+        if stability_score > 0.75: name += " [STABIL]"
+        elif stability_score < 0.4: name += " [TAKTE]"
         
         return OperatingRegion(
             name=name,
             power_range=(min_p, max_p),
             stability_score=stability_score,
-            fluctuation_rate=avg_instability,
+            fluctuation_rate=avg_std,
             sample_count=len(group),
-            conditions={'avg_power': avg_power}
+            conditions={'avg_power': avg_power, 'avg_std': avg_std}
         )
 
     def _generate_recommendation(self, result: AnalysisResult) -> str:
@@ -260,7 +263,16 @@ class Analyzer:
         if result.min_stable_power:
             lines.append(f"Minimale stabile Last: {result.min_stable_power:.0f}W")
             
-        stable_regions = [r for r in result.regions if r.stability_score > 0.7]
+        # In v2, we are slightly more lenient for recommendations if no 
+        # perfect regions are found, taking the relatively best ones.
+        stable_regions = [r for r in result.regions if r.stability_score > 0.6]
+        
+        if not stable_regions and result.regions:
+            # Fallback: take the best region if it's at least "decent"
+            best = max(result.regions, key=lambda r: r.stability_score)
+            if best.stability_score > 0.4:
+                stable_regions = [best]
+
         if stable_regions:
             ranges = [f"{r.power_range[0]:.0f}-{r.power_range[1]:.0f}W" for r in stable_regions]
             lines.append(f"Empfohlene Bereiche: {', '.join(ranges)}")

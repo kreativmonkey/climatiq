@@ -1,20 +1,15 @@
-"""Controller module for HVAC optimization actions.
+"""Controller module for HVAC optimization actions v2.
 
-Decides and executes actions to prevent cycling based on predictions
-and current system state.
-
-Cycling is defined broadly: not just compressor on/off toggling, but also
-frequent large fluctuations in power consumption. The controller aims to
-dampen these fluctuations with gentle interventions rather than forcing
-the system to artificially high loads.
+Optimized for stability and power variance reduction. Targets minimum
+stable energy consumption points discovered by the Analyzer.
 """
 
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from enum import Enum
-from typing import Any
+from typing import Any, Optional
 
 from climatiq.core.entities import OptimizerStatus, SystemMode
 
@@ -36,10 +31,10 @@ class ControlAction:
     """Represents a control action to be executed."""
 
     action_type: ActionType
-    target_unit: str | None = None
+    target_unit: Optional[str] = None
     parameters: dict[str, Any] = field(default_factory=dict)
     reason: str = ""
-    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
+    timestamp: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
 
 @dataclass
@@ -53,362 +48,200 @@ class ActionResult:
 
 
 class Controller:
-    """Decides and coordinates HVAC control actions.
+    """Decides and coordinates HVAC control actions (v2).
 
     Strategies:
-    1. Load Balancing: Distribute load across multiple units to dampen
-       power fluctuations (not just to raise total power).
-    2. Stabilize Low Load: When power is low but unstable, gently increase
-       minimum load without forcing high consumption.
-    3. Temperature Modulation: Adjust setpoints to keep compressor stable.
-    4. Fan Control: Use fan speed to modulate heat transfer rate.
+    1. Stability Targeting: Target learned minimum stable power zones (400-600W).
+    2. Gradual Modulation: Use small temp steps (0.2°C) to nudge the system.
+    3. Night Mode: Preemptive buffering during quiet hours.
+    4. Variance Dampening: React to power_std and spread to stop fluctuations.
     """
 
     # Safety limits
-    MAX_TEMP_DEVIATION = 1.5  # Maximum deviation from user setpoint
-    MIN_ACTION_INTERVAL = timedelta(minutes=10)  # Give system time to settle
-
-    # Thresholds for instability-based decisions
-    LOW_POWER_THRESHOLD = 600.0  # Watts – below this counts as "low load"
-    STABILIZE_TEMP_BOOST = 0.5  # °C – gentle temp increase for stabilisation
+    MAX_TEMP_DEVIATION = 1.5
+    MIN_ACTION_INTERVAL = timedelta(minutes=10)
+    
+    # v2 Stability Thresholds
+    STABLE_STD_THRESHOLD = 50.0 # Watts
+    HIGH_SPREAD_THRESHOLD = 300.0 # Watts
 
     def __init__(self, config: dict[str, Any]):
         self.config = config
-        self._last_action_time: datetime | None = None
+        self._last_action_time: Optional[datetime] = None
         self._action_history: list[ControlAction] = []
-        self._action_callback: Callable | None = None
+        self._action_callback: Optional[Callable] = None
 
         # Statistics
         self.stats = {
             "actions_taken": 0,
             "cycles_prevented": 0,
-            "load_balancing_count": 0,
-            "temp_adjustments": 0,
-            "stabilize_low_load_count": 0,
+            "stability_actions": 0,
+            "night_mode_actions": 0,
+            "gradual_nudges": 0,
         }
 
     def set_action_callback(self, callback: Callable[[ControlAction], bool]):
-        """Set callback function to execute actions (e.g., HA service calls)."""
         self._action_callback = callback
 
     def should_act(self, status: OptimizerStatus) -> bool:
-        """Determine if we should take action now."""
-        # Don't act in observation or manual mode
         if status.mode in (SystemMode.OBSERVATION, SystemMode.MANUAL):
             return False
 
-        # Respect minimum interval
         if self._last_action_time:
-            elapsed = datetime.now(UTC) - self._last_action_time
+            elapsed = datetime.now(timezone.utc) - self._last_action_time
             if elapsed < self.MIN_ACTION_INTERVAL:
                 return False
 
         return True
 
+    def is_night_mode(self) -> bool:
+        """Check if we are in night hours (23:00 - 06:00)."""
+        now = datetime.now(timezone.utc).astimezone() # Use local time if possible
+        return now.hour >= 23 or now.hour < 6
+
     def decide_action(
         self, status: OptimizerStatus, prediction: dict[str, Any], analysis: dict[str, Any]
     ) -> ControlAction:
-        """Decide what action to take based on current state and predictions.
-
-        The decision incorporates both traditional cycling risk (on/off toggling)
-        and instability signals (large power fluctuations).  The goal is to
-        stabilise the system with the *gentlest* possible intervention – never
-        artificially pushing power to high levels when low, stable operation
-        is achievable.
-
-        Args:
-            status: Current system status from Observer.
-            prediction: Cycling prediction from Predictor.
-            analysis: Analysis results from Analyzer.
-
-        Returns:
-            ControlAction to execute.
-        """
-        # --- Evaluate risk signals ---
-        cycling_predicted = prediction.get("cycling_predicted", False)
-        cycling_prob = prediction.get("probability", 0)
-        cycling_risk = status.cycling_risk
-        instability_high: bool = prediction.get("instability_high", False) or analysis.get(
-            "instability_high", False
-        )
-
-        # No action if system is stable and no instability flagged
-        if not cycling_predicted and cycling_risk < 0.5 and not instability_high:
-            return ControlAction(
-                action_type=ActionType.NO_ACTION, reason="Kein Handlungsbedarf – System stabil"
-            )
-
-        # Get context values
-        min_stable_power = analysis.get("min_stable_power", 400)
-        current_power = status.power_consumption
+        """v2 Decision Logic: Stabilize and Minimize."""
+        
+        # 1. Evaluate Stability Metrics
+        cycling_risk = status.cycling_risk # Our v2 score (0-1.0)
         power_std = analysis.get("power_std", 0.0)
+        power_spread = analysis.get("power_spread", 0.0)
+        current_power = status.power_consumption
+        min_stable_power = analysis.get("min_stable_power", 450.0)
 
-        # --- Strategy 1: Load Balancing ---
-        # Activate when power is below stable threshold OR when power fluctuations
-        # are large (high power_std), regardless of absolute power level.
-        if current_power < min_stable_power or power_std > 150:
-            action = self._strategy_load_balancing(status, min_stable_power, power_std)
+        is_unstable = (cycling_risk > 0.6 or 
+                       power_std > self.STABLE_STD_THRESHOLD or 
+                       power_spread > self.HIGH_SPREAD_THRESHOLD)
+
+        # No action if stable and within efficient range
+        if not is_unstable and current_power >= min_stable_power:
+            return ControlAction(ActionType.NO_ACTION, reason="System stabil und effizient.")
+
+        # 2. Night Mode Strategy (Preemptive)
+        if self.is_night_mode() and is_unstable:
+            action = self._strategy_night_mode(status, min_stable_power)
             if action.action_type != ActionType.NO_ACTION:
+                self.stats["night_mode_actions"] += 1
                 return action
 
-        # --- Strategy 2: Stabilize Low Load ---
-        # Power is low (< 600 W) but unstable → gentle nudge, don't force high load.
-        if current_power < self.LOW_POWER_THRESHOLD and instability_high:
-            action = self._strategy_stabilize_low_load(status)
+        # 3. Stability Targeting (Load Balancing)
+        # If power is too low to be stable or variance is high
+        if current_power < min_stable_power or is_unstable:
+            action = self._strategy_stability_targeting(status, min_stable_power, power_std)
             if action.action_type != ActionType.NO_ACTION:
+                self.stats["stability_actions"] += 1
                 return action
 
-        # --- Strategy 3: Temperature Modulation ---
-        # Slightly lower setpoint to extend compressor runtime
-        if cycling_prob > 0.7 or instability_high:
-            action = self._strategy_temp_modulation(status)
+        # 4. Gradual Nudge (Temperature)
+        # If we just need a tiny bit more load to reach stability
+        if is_unstable:
+            action = self._strategy_gradual_nudge(status)
             if action.action_type != ActionType.NO_ACTION:
+                self.stats["gradual_nudges"] += 1
                 return action
 
-        # --- Strategy 4: Fan Speed Reduction ---
-        # Lower fan = slower heat transfer = longer runtime
-        if cycling_prob > 0.6:
-            action = self._strategy_fan_control(status)
-            if action.action_type != ActionType.NO_ACTION:
-                return action
+        return ControlAction(ActionType.NO_ACTION, reason="Keine passende Intervention gefunden.")
 
-        return ControlAction(
-            action_type=ActionType.NO_ACTION, reason="Keine passende Strategie gefunden"
-        )
+    # --- Strategies ---
 
-    # ------------------------------------------------------------------
-    # Strategies
-    # ------------------------------------------------------------------
-
-    def _strategy_load_balancing(
-        self, status: OptimizerStatus, target_power: float, power_std: float = 0.0
-    ) -> ControlAction:
-        """Distribute load across units to dampen fluctuations.
-
-        Activates an additional low-priority unit so the compressor
-        doesn't have to cycle a single unit rapidly.  Also triggers when
-        ``power_std`` is high, even if absolute power is acceptable.
-        """
-        # Find inactive units that could be enabled
-        inactive_units = [(name, unit) for name, unit in status.units.items() if not unit.is_on]
-
+    def _strategy_night_mode(self, status: OptimizerStatus, min_stable: float) -> ControlAction:
+        """Night Mode: Use low-priority units as thermal buffers with lower temps."""
+        inactive_units = [(n, u) for n, u in status.units.items() if not u.is_on]
         if not inactive_units:
-            return ControlAction(
-                action_type=ActionType.NO_ACTION, reason="Keine inaktiven Geräte verfügbar"
-            )
+            return ControlAction(ActionType.NO_ACTION)
 
-        # Sort by priority (from config) – prefer low-priority rooms as buffers
+        # Prefer low priority units
         priorities = self.config.get("unit_priorities", {})
         inactive_units.sort(key=lambda x: priorities.get(x[0], 50))
+        target_name, _ = inactive_units[0]
 
-        # Enable the lowest priority inactive unit
-        target_name, _target_unit = inactive_units[0]
-
-        # Calculate a modest setpoint (slightly below comfort)
-        base_temp = self.config.get("comfort", {}).get("target_temp", 21.0)
-        buffer_temp = base_temp - 1.0  # 1 degree below comfort
-
-        reason_detail = (
-            f"Lastverteilung: {target_name} als Puffer aktivieren"
-            f" (Ziel {target_power:.0f}W, σ={power_std:.0f}W)"
-        )
-
+        # Night temp is lower to avoid waking people but provide load
+        night_temp = self.config.get("comfort", {}).get("night_temp", 19.0)
+        
         return ControlAction(
-            action_type=ActionType.ENABLE_UNIT,
+            ActionType.ENABLE_UNIT,
             target_unit=target_name,
-            parameters={"temperature": buffer_temp, "fan_mode": "low"},
-            reason=reason_detail,
+            parameters={"temperature": night_temp, "fan_mode": "low"},
+            reason=f"Night Mode: {target_name} als Puffer aktiviert ({night_temp}°C) für Stabilität."
         )
 
-    def _strategy_stabilize_low_load(self, status: OptimizerStatus) -> ControlAction:
-        """Gently stabilise a low-but-unstable load.
-
-        When power is below ``LOW_POWER_THRESHOLD`` but fluctuating heavily,
-        we make a *small* adjustment – e.g. bump fan speed on one unit or raise
-        the setpoint by 0.5 °C on a secondary unit – to add a thin cushion of
-        load.  We deliberately do NOT jump to >1000 W; the goal is the minimum
-        stable operating point.
-        """
-        # Prefer adjusting fan speed on an active unit first (cheapest intervention)
-        active_units = [
-            (name, unit)
-            for name, unit in status.units.items()
-            if unit.is_on and unit.fan_mode in ("low", "quiet", "silent")
-        ]
-
-        if active_units:
-            # Raise fan speed one notch on lowest-priority active unit
+    def _strategy_stability_targeting(self, status: OptimizerStatus, target: float, std: float) -> ControlAction:
+        """Target the learned minimum stable power zone."""
+        inactive_units = [(n, u) for n, u in status.units.items() if not u.is_on]
+        
+        if inactive_units:
+            # Activate additional unit to reach stable floor
             priorities = self.config.get("unit_priorities", {})
-            active_units.sort(key=lambda x: priorities.get(x[0], 50))
-            target_name, target_unit = active_units[0]
-
-            self.stats["stabilize_low_load_count"] += 1
+            inactive_units.sort(key=lambda x: priorities.get(x[0], 50))
+            target_name, _ = inactive_units[0]
+            
+            base_temp = self.config.get("comfort", {}).get("target_temp", 21.0)
+            
             return ControlAction(
-                action_type=ActionType.ADJUST_FAN,
+                ActionType.ENABLE_UNIT,
                 target_unit=target_name,
-                parameters={"fan_mode": "medium", "previous": target_unit.fan_mode},
-                reason=(
-                    f"Stabilisierung niedriger Last: Lüfter {target_name} "
-                    f"von '{target_unit.fan_mode}' auf 'medium'"
-                ),
+                parameters={"temperature": base_temp - 0.5, "fan_mode": "auto"},
+                reason=f"Stabilitäts-Targeting: {target_name} aktiviert (Ziel >{target:.0f}W, σ={std:.0f}W)."
             )
+            
+        return ControlAction(ActionType.NO_ACTION)
 
-        # Fallback: raise setpoint slightly on a secondary unit (if available)
-        secondary_units = [
-            (name, unit)
-            for name, unit in status.units.items()
-            if unit.is_on and unit.target_temp is not None
-        ]
-        if secondary_units:
-            priorities = self.config.get("unit_priorities", {})
-            secondary_units.sort(key=lambda x: priorities.get(x[0], 50))
-            target_name, target_unit = secondary_units[0]
-
-            new_setpoint = target_unit.target_temp + self.STABILIZE_TEMP_BOOST
-            max_temp = self.config.get("comfort", {}).get("target_temp", 21.0) + self.MAX_TEMP_DEVIATION
-            if new_setpoint > max_temp:
-                return ControlAction(
-                    action_type=ActionType.NO_ACTION,
-                    reason=f"Kann Sollwert nicht weiter erhöhen (Max: {max_temp}°C)",
-                )
-
-            self.stats["stabilize_low_load_count"] += 1
-            return ControlAction(
-                action_type=ActionType.ADJUST_TEMP,
-                target_unit=target_name,
-                parameters={"temperature": new_setpoint, "previous": target_unit.target_temp},
-                reason=(
-                    f"Stabilisierung niedriger Last: {target_name} "
-                    f"von {target_unit.target_temp}°C auf {new_setpoint}°C (+{self.STABILIZE_TEMP_BOOST}°C)"
-                ),
-            )
-
-        return ControlAction(
-            action_type=ActionType.NO_ACTION,
-            reason="Stabilisierung nicht möglich – keine passenden Geräte",
-        )
-
-    def _strategy_temp_modulation(self, status: OptimizerStatus) -> ControlAction:
-        """Adjust temperature setpoints to extend compressor runtime."""
-        # Find active units where we can lower the setpoint
-        active_units = [
-            (name, unit)
-            for name, unit in status.units.items()
-            if unit.is_on and unit.target_temp is not None
-        ]
-
+    def _strategy_gradual_nudge(self, status: OptimizerStatus) -> ControlAction:
+        """Smallest possible intervention: adjust setpoint by 0.2-0.3°C."""
+        active_units = [(n, u) for n, u in status.units.items() if u.is_on and u.target_temp is not None]
         if not active_units:
-            return ControlAction(
-                action_type=ActionType.NO_ACTION, reason="Keine aktiven Geräte mit Sollwert"
-            )
+            return ControlAction(ActionType.NO_ACTION)
 
-        # Find unit with highest setpoint (most room to reduce)
-        target_name, target_unit = max(active_units, key=lambda x: x[1].target_temp or 0)
-
-        current_setpoint = target_unit.target_temp
-        new_setpoint = current_setpoint - 0.5  # Reduce by 0.5°C
-
-        # Safety check: don't go below minimum comfort
-        min_temp = self.config.get("comfort", {}).get("min_temp", 19.0)
-        if new_setpoint < min_temp:
-            return ControlAction(
-                action_type=ActionType.NO_ACTION,
-                reason=f"Kann Sollwert nicht weiter senken (Min: {min_temp}°C)",
-            )
-
-        return ControlAction(
-            action_type=ActionType.ADJUST_TEMP,
-            target_unit=target_name,
-            parameters={"temperature": new_setpoint, "previous": current_setpoint},
-            reason=f"Temperaturmodulation: {target_name} von {current_setpoint}°C auf {new_setpoint}°C",
-        )
-
-    def _strategy_fan_control(self, status: OptimizerStatus) -> ControlAction:
-        """Reduce fan speed to slow heat transfer."""
-        active_units = [
-            (name, unit)
-            for name, unit in status.units.items()
-            if unit.is_on and unit.fan_mode not in ("low", "quiet", "silent")
-        ]
-
-        if not active_units:
-            return ControlAction(
-                action_type=ActionType.NO_ACTION,
-                reason="Alle Geräte bereits auf niedriger Lüfterstufe",
-            )
-
+        # Pick unit with highest priority (most important room) or most room for change
         target_name, target_unit = active_units[0]
+        
+        current_temp = target_unit.target_temp
+        new_temp = current_temp + 0.3 # Small nudge up to increase load slightly
+        
+        max_temp = self.config.get("comfort", {}).get("target_temp", 21.0) + self.MAX_TEMP_DEVIATION
+        if new_temp > max_temp:
+            new_temp = current_temp - 0.3 # Try nudging down if up is blocked
+            if new_temp < (self.config.get("comfort", {}).get("target_temp", 21.0) - self.MAX_TEMP_DEVIATION):
+                return ControlAction(ActionType.NO_ACTION)
 
         return ControlAction(
-            action_type=ActionType.ADJUST_FAN,
+            ActionType.ADJUST_TEMP,
             target_unit=target_name,
-            parameters={"fan_mode": "low", "previous": target_unit.fan_mode},
-            reason=f"Lüfterreduzierung: {target_name} auf 'low'",
+            parameters={"temperature": new_temp, "previous": current_temp},
+            reason=f"Gradual Nudge: {target_name} um 0.3°C angepasst zur Stabilisierung."
         )
 
-    # ------------------------------------------------------------------
-    # Execution
-    # ------------------------------------------------------------------
+    # --- Execution ---
 
     def execute_action(self, action: ControlAction) -> ActionResult:
-        """Execute the decided action."""
         if action.action_type == ActionType.NO_ACTION:
-            return ActionResult(success=True, action=action, message="Keine Aktion nötig")
+            return ActionResult(True, action, "Keine Aktion nötig.")
 
         if not self._action_callback:
-            logger.warning("No action callback set - cannot execute action")
-            return ActionResult(
-                success=False,
-                action=action,
-                message="Keine Callback-Funktion für Aktionen konfiguriert",
-            )
+            return ActionResult(False, action, "Kein Action-Callback gesetzt.")
 
         try:
             success = self._action_callback(action)
-
             if success:
-                self._last_action_time = datetime.now(UTC)
+                self._last_action_time = datetime.now(timezone.utc)
                 self._action_history.append(action)
                 self.stats["actions_taken"] += 1
-
-                if action.action_type == ActionType.ENABLE_UNIT:
-                    self.stats["load_balancing_count"] += 1
-                elif action.action_type == ActionType.ADJUST_TEMP:
-                    self.stats["temp_adjustments"] += 1
-
-                logger.info(f"Action executed: {action.action_type.value} - {action.reason}")
-
-            return ActionResult(
-                success=success,
-                action=action,
-                message="Erfolgreich" if success else "Ausführung fehlgeschlagen",
-            )
-
+                logger.info(f"Executed: {action.reason}")
+            
+            return ActionResult(success, action, "Erfolgreich" if success else "Fehler bei Ausführung")
         except Exception as e:
-            logger.error(f"Action execution failed: {e}")
-            return ActionResult(success=False, action=action, message=f"Fehler: {str(e)}")
-
-    def record_prevented_cycle(self):
-        """Record that a cycle was successfully prevented."""
-        self.stats["cycles_prevented"] += 1
+            logger.error(f"Action execution error: {e}")
+            return ActionResult(False, action, str(e))
 
     def get_dashboard_data(self) -> dict[str, Any]:
-        """Get data for Home Assistant dashboard."""
-        recent_actions = self._action_history[-10:]  # Last 10 actions
-
         return {
             "stats": self.stats,
             "last_action": self._action_history[-1].reason if self._action_history else None,
-            "last_action_time": (
-                self._last_action_time.isoformat() if self._last_action_time else None
-            ),
-            "recent_actions": [
-                {
-                    "type": a.action_type.value,
-                    "target": a.target_unit,
-                    "reason": a.reason,
-                    "time": a.timestamp.isoformat(),
-                }
-                for a in recent_actions
-            ],
+            "last_action_time": self._last_action_time.isoformat() if self._last_action_time else None,
+            "history": [
+                {"type": a.action_type.value, "target": a.target_unit, "reason": a.reason, "time": a.timestamp.isoformat()}
+                for a in self._action_history[-5:]
+            ]
         }
