@@ -206,12 +206,8 @@ def test_no_units_available_no_action(controller):
     """Test controller handles no available units gracefully."""
     # All units on
     units = {
-        "wohnzimmer": UnitStatus(
-            name="wohnzimmer", entity_id="climate.wz", is_on=True
-        ),
-        "schlafzimmer": UnitStatus(
-            name="schlafzimmer", entity_id="climate.sz", is_on=True
-        ),
+        "wohnzimmer": UnitStatus(name="wohnzimmer", entity_id="climate.wz", is_on=True),
+        "schlafzimmer": UnitStatus(name="schlafzimmer", entity_id="climate.sz", is_on=True),
     }
 
     status = OptimizerStatus(

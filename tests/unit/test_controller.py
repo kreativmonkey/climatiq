@@ -12,7 +12,6 @@ import pytest
 from climatiq.core.controller import ActionType, ControlAction, Controller
 from climatiq.core.entities import OptimizerStatus, SystemMode, UnitStatus
 
-
 # Skip reason for tests that need API update
 SKIP_OLD_API = pytest.mark.skip(reason="Test needs update for new Controller API")
 
