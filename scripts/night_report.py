@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """ClimatIQ Night Report Generator"""
 
-import pandas as pd
-import numpy as np
 from datetime import datetime, timedelta
+
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 client = InfluxV1Client()
@@ -75,7 +74,7 @@ if not current_report:
     print("Keine Daten gefunden.")
     exit(1)
 
-print(f"REPORT_START")
+print("REPORT_START")
 print(f"Periode: {start.strftime('%d.%m. %H:%M')} bis {end.strftime('%d.%m. %H:%M')}")
 print(
     f"Stabilität (Instabil %): {current_report['unstable_pct']:.1f}% (Gestern: {yesterday_report['unstable_pct']:.1f}% if yesterday_report else 'N/A')"
@@ -84,4 +83,4 @@ print(f"Durchschnittliche Power: {current_report['avg_power']:.0f}W")
 print(f"Takt-Events (An/Aus): {current_report['cycles']:.0f}")
 print(f"450W Zonen-Treue: {current_report['target_zone_pct']:.1f}% der Laufzeit")
 print(f"Power Range: {current_report['min_power']:.0f}W - {current_report['max_power']:.0f}W")
-print(f"REPORT_END")
+print("REPORT_END")

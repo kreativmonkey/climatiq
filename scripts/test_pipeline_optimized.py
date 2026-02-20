@@ -2,11 +2,11 @@
 """Optimized pipeline test with sampling for large datasets."""
 
 import pandas as pd
-import numpy as np
+
 from climatiq.core.analyzer import Analyzer
-from climatiq.core.observer import Observer
-from climatiq.core.controller import Controller, ActionType
+from climatiq.core.controller import ActionType, Controller
 from climatiq.core.entities import OptimizerStatus, SystemMode
+from climatiq.core.observer import Observer
 
 print("=" * 70)
 print("ClimatIQ v2 - Optimized Pipeline Test (30 Days, Sampled)")
@@ -33,7 +33,7 @@ print(f"Sampled to {len(df_sampled)} points for analysis...")
 analyzer = Analyzer()
 result = analyzer.analyze(df_sampled["value"])
 
-print(f"\n✓ Analysis complete")
+print("\n✓ Analysis complete")
 print(f"  Min Stable Power: {result.min_stable_power:.1f} W")
 print(f"  Regions discovered: {len(result.regions)}")
 
@@ -142,12 +142,12 @@ low_power_stable_pct = (low_power_stable_mask.sum() / len(df)) * 100
 cycling_episodes = ((df["std"] > 100) | (df["spread"] > 400)).sum()
 cycling_pct = (cycling_episodes / len(df)) * 100
 
-print(f"\n📊 Stability:")
+print("\n📊 Stability:")
 print(f"  • Stable time (Std<50W): {stable_pct:.1f}%")
 print(f"  • Low-power stable (<600W): {low_power_stable_pct:.1f}%")
 print(f"  • Cycling detected: {cycling_pct:.1f}%")
 
-print(f"\n📈 Power Stats:")
+print("\n📈 Power Stats:")
 print(f"  • Mean: {df['value'].mean():.1f} W")
 print(f"  • Median: {df['value'].median():.1f} W")
 print(f"  • Std Dev: {df['value'].std():.1f} W")

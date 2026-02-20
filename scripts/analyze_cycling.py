@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """Analyze power data for cycling patterns using v2 detection logic."""
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
+from datetime import timedelta
+
 import matplotlib.dates as mdates
-from datetime import datetime, timedelta
+import matplotlib.pyplot as plt
+import pandas as pd
 
 # Load data
 df = pd.read_csv(
@@ -40,12 +40,12 @@ df["is_cycling"] = df["cycling_risk"] > 70
 # Statistiken
 print("=== Cycling Analysis (v2) ===")
 print(f"\nDataset: {len(df)} points, {df.index[0]} to {df.index[-1]}")
-print(f"\nPower Statistics:")
+print("\nPower Statistics:")
 print(f"  Range: {df['value'].min():.1f} - {df['value'].max():.1f} W")
 print(f"  Mean: {df['value'].mean():.1f} W")
 print(f"  Overall Std Dev: {df['value'].std():.1f} W")
 
-print(f"\nCycling Detection:")
+print("\nCycling Detection:")
 cycling_points = df["is_cycling"].sum()
 cycling_pct = (cycling_points / len(df)) * 100
 print(f"  Cycling points: {cycling_points} ({cycling_pct:.1f}%)")
@@ -169,7 +169,7 @@ plt.savefig(
     dpi=150,
     bbox_inches="tight",
 )
-print(f"\n✓ Visualization saved to data/cycling_analysis.png")
+print("\n✓ Visualization saved to data/cycling_analysis.png")
 
 # Zoomed view: letzte 24h
 df_recent = df[df.index > (df.index[-1] - timedelta(hours=24))]
@@ -229,4 +229,4 @@ plt.savefig(
     dpi=150,
     bbox_inches="tight",
 )
-print(f"✓ 24h visualization saved to data/cycling_analysis_24h.png")
+print("✓ 24h visualization saved to data/cycling_analysis_24h.png")

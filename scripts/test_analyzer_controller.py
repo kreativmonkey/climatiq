@@ -2,8 +2,9 @@
 """Sprint 4 Validation - Analyzer + Controller (fast test)."""
 
 import pandas as pd
+
 from climatiq.core.analyzer import Analyzer
-from climatiq.core.controller import Controller, ActionType
+from climatiq.core.controller import ActionType, Controller
 from climatiq.core.entities import OptimizerStatus, SystemMode
 
 print("=" * 70)
@@ -29,7 +30,7 @@ print("=" * 70)
 analyzer = Analyzer()
 result = analyzer.analyze(df["value"])
 
-print(f"✓ Complete")
+print("✓ Complete")
 print(f"  Data sufficient: {result.sufficient_data}")
 print(f"  Min Stable Power: {result.min_stable_power:.1f} W")
 print(f"  Regions discovered: {len(result.regions)}")
@@ -122,17 +123,17 @@ if actions:
     from collections import Counter
 
     counts = Counter(actions)
-    print(f"\n  Action breakdown:")
+    print("\n  Action breakdown:")
     for act, cnt in counts.most_common():
         print(f"    • {act}: {cnt}")
 
-    print(f"\n  Sample actions:")
+    print("\n  Sample actions:")
     for sample in action_samples:
         print(f"    • {sample['time']}: {sample['action']}")
         print(f"      Power={sample['power']:.0f}W, Risk={sample['risk']:.0%}")
         print(f"      → {sample['reason']}")
 
-print(f"\n  Controller Stats:")
+print("\n  Controller Stats:")
 for k, v in controller.stats.items():
     if v > 0:
         print(f"    • {k}: {v}")
@@ -158,12 +159,12 @@ low_power_stable_pct = (low_power_stable / len(df)) * 100
 cycling_episodes = ((df["std"] > 100) | (df["spread"] > 400)).sum()
 cycling_pct = (cycling_episodes / len(df)) * 100
 
-print(f"Stability:")
+print("Stability:")
 print(f"  • Stable (Std<50W): {stable_pct:.1f}% ({stable_time} of {len(df)} points)")
 print(f"  • Low-power stable: {low_power_stable_pct:.1f}%")
 print(f"  • Cycling detected: {cycling_pct:.1f}%")
 
-print(f"\nPower Distribution:")
+print("\nPower Distribution:")
 print(f"  • Mean: {df['value'].mean():.0f} W")
 print(f"  • Median: {df['value'].median():.0f} W")
 print(f"  • P25/P75: {df['value'].quantile(0.25):.0f} / {df['value'].quantile(0.75):.0f} W")
@@ -192,10 +193,10 @@ print(f"\nResults: {passed}/{total} passed\n")
 for name, result in checks:
     print(f"  {'✅' if result else '❌'} {name}")
 
-print(f"\n📋 Sprint 4 Status:")
-print(f"  ✅ Analyzer v2: Functional (400W min stable power)")
+print("\n📋 Sprint 4 Status:")
+print("  ✅ Analyzer v2: Functional (400W min stable power)")
 print(f"  ✅ Controller v2: Functional ({len(actions)} actions)")
-print(f"  ⚠️  Observer v2: Performance issues (needs optimization)")
+print("  ⚠️  Observer v2: Performance issues (needs optimization)")
 print(f"  {'✅' if passed >= 3 else '⚠️ '} Integration: {'Ready' if passed >= 3 else 'Needs work'}")
 
 if passed == total:

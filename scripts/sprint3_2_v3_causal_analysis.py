@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Sprint 3.2 V3: Kausale Analyse - Was VERURSACHT Instabilität?"""
 
-import pandas as pd
-import numpy as np
 import matplotlib
+import numpy as np
+import pandas as pd
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+
+import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.mixture import GaussianMixture
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.preprocessing import StandardScaler
+
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 client = InfluxV1Client()
@@ -22,7 +24,7 @@ MAX_DAYS = 90
 end = datetime.now()
 start = end - timedelta(days=MAX_DAYS)
 
-print(f"=== SPRINT 3.2 V3: KAUSALE ANALYSE ===\n")
+print("=== SPRINT 3.2 V3: KAUSALE ANALYSE ===\n")
 print("Frage: Welche EXTERNEN Faktoren VERURSACHEN Instabilität?\n")
 print(f"Lade Daten (max {MAX_DAYS} Tage)...")
 print(f"Zeitraum: {start.strftime('%Y-%m-%d')} bis {end.strftime('%Y-%m-%d')}\n")
@@ -181,7 +183,7 @@ df.loc[~df["gmm_cluster"].isin(stable_clusters) & (df["gmm_cluster"] >= 0), "lab
 df_ml = df[df["label_gmm"].isin(["stable", "unstable"])].copy()
 df_ml["target"] = (df_ml["label_gmm"] == "unstable").astype(int)
 
-print(f"\n--- ML DATASET ---")
+print("\n--- ML DATASET ---")
 print(f"  Stable: {(df_ml['target'] == 0).sum()}")
 print(f"  Unstable: {(df_ml['target'] == 1).sum()}")
 
@@ -277,7 +279,7 @@ print(classification_report(y_test, y_pred, target_names=["Stable", "Unstable"])
 
 cm = confusion_matrix(y_test, y_pred)
 print("\nConfusion Matrix:")
-print(f"                Predicted Stable  Predicted Unstable")
+print("                Predicted Stable  Predicted Unstable")
 print(f"Actual Stable        {cm[0][0]:6d}            {cm[0][1]:6d}")
 print(f"Actual Unstable      {cm[1][0]:6d}            {cm[1][1]:6d}")
 
@@ -409,9 +411,9 @@ feature_importance_df.to_csv(
 print("✓ Kausale Features exportiert: data/feature_importance_causal.csv")
 
 print("\n✅ Sprint 3.2 V3 abgeschlossen!")
-print(f"\n🎯 KERNERKENNTNISSE:")
+print("\n🎯 KERNERKENNTNISSE:")
 print(f"  - Test Accuracy: {(y_pred == y_test).sum() / len(y_test):.1%}")
 print(
     f"  - Top kausaler Faktor: {feature_importance_df.iloc[0]['feature']} ({feature_importance_df.iloc[0]['importance']*100:.1f}%)"
 )
-print(f"  - Diese Faktoren sind URSACHEN, nicht Symptome!")
+print("  - Diese Faktoren sind URSACHEN, nicht Symptome!")

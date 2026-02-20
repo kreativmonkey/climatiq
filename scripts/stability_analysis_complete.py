@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Vollständige Stabilitätsanalyse mit ALLEN verfügbaren Daten"""
 
-import pandas as pd
-import numpy as np
 import matplotlib
+import numpy as np
+import pandas as pd
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+
+import matplotlib.pyplot as plt
+
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 client = InfluxV1Client()

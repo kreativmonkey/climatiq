@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """Sprint 3.2: ML Feature Importance & Multi-Dimensional Clustering"""
 
-import pandas as pd
-import numpy as np
 import matplotlib
+import numpy as np
+import pandas as pd
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
+
+import matplotlib.pyplot as plt
 from sklearn.cluster import DBSCAN
 from sklearn.decomposition import PCA
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.preprocessing import StandardScaler
+
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 client = InfluxV1Client()
@@ -309,9 +311,9 @@ feature_importance_df.to_csv(
 print("✓ Feature Importance exportiert: data/feature_importance.csv")
 
 print("\n✅ Sprint 3.2 abgeschlossen!")
-print(f"\n🎯 KEY FINDINGS:")
+print("\n🎯 KEY FINDINGS:")
 print(
     f"  - Top Feature: {feature_importance_df.iloc[0]['feature']} ({feature_importance_df.iloc[0]['importance']:.3f})"
 )
 print(f"  - Stable Clusters: {len(set(clusters)) - (1 if -1 in clusters else 0)}")
-print(f"  - Model Accuracy wird im nächsten Sprint mit Train/Test Split gemessen")
+print("  - Model Accuracy wird im nächsten Sprint mit Train/Test Split gemessen")

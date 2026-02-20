@@ -1,16 +1,17 @@
 #!/usr/bin/env python3
 """Automatisches Finden von stabilen Betriebszonen ohne hard-coded Ranges"""
 
-import pandas as pd
-import numpy as np
 import matplotlib
+import numpy as np
+import pandas as pd
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-from sklearn.cluster import DBSCAN
+
+import matplotlib.pyplot as plt
 from sklearn.mixture import GaussianMixture
 from sklearn.preprocessing import StandardScaler
+
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 client = InfluxV1Client()
@@ -275,11 +276,11 @@ with open("/home/diyon/.openclaw/workspace/climatiq/data/stable_zones_config.jso
 print("✓ Config exportiert: data/stable_zones_config.json")
 
 print("\n✅ Analyse abgeschlossen!")
-print(f"\n🎯 EMPFEHLUNG für Labeling:")
+print("\n🎯 EMPFEHLUNG für Labeling:")
 stable_clusters = cluster_df[cluster_df["power_std_median"] < 50]
 if len(stable_clusters) > 0:
     print(f"  - Nutze Cluster {stable_clusters['cluster'].tolist()} als 'stable'")
-    print(f"  - Diese decken Power-Bereiche ab:")
+    print("  - Diese decken Power-Bereiche ab:")
     for _, row in stable_clusters.iterrows():
         print(
             f"    * Cluster {int(row['cluster'])}: ~{row['power_median']:.0f}W (Std: {row['power_std_median']:.0f}W)"

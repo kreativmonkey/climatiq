@@ -7,12 +7,13 @@ Features:
 - RL Logging (State-Action-Reward)
 """
 
-import appdaemon.plugins.hass.hassapi as hass
 import json
 import os
-import numpy as np
 from datetime import datetime, timedelta
-from typing import Dict, List, Optional, Any
+from typing import Dict, List, Optional
+
+import appdaemon.plugins.hass.hassapi as hass
+import numpy as np
 
 
 class ClimatIQController(hass.Hass):
@@ -72,7 +73,7 @@ class ClimatIQController(hass.Hass):
             if zones:
                 self.stable_zones = zones["stable"]
                 self.unstable_zones = zones["unstable"]
-                self.log(f"✓ Zonen erkannt:")
+                self.log("✓ Zonen erkannt:")
                 self.log(f"  Stabile Zonen: {len(self.stable_zones)}")
                 for z in self.stable_zones:
                     self.log(f"    - {z['power_mean']:.0f}W (±{z['power_std']:.0f}W)")
@@ -144,7 +145,7 @@ class ClimatIQController(hass.Hass):
             try:
                 val = float(state["state"])
                 points.append({"power": val})
-            except:
+            except (ValueError, KeyError, TypeError):
                 pass
 
         self.log(f"HA History: {len(points)} Datenpunkte geladen")

@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Vollständige Stabilitätsanalyse mit Climate State Data aus InfluxDB"""
 
-import pandas as pd
-import numpy as np
 import matplotlib
+import numpy as np
+import pandas as pd
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+
+import matplotlib.pyplot as plt
+
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 client = InfluxV1Client()
@@ -356,7 +358,7 @@ stable_df = pd.DataFrame(long_stable)
 
 if len(stable_df) > 0:
     print(f"Gefunden: {len(stable_df)} stabile Episoden (>30 min)\n")
-    print(f"Durchschnittliche stabile Konfiguration:")
+    print("Durchschnittliche stabile Konfiguration:")
     print(
         f"  Power: {stable_df['power_mean'].mean():.0f} W (Std: {stable_df['power_std'].mean():.1f} W)"
     )
@@ -364,14 +366,14 @@ if len(stable_df) > 0:
         f"  Dauer: {stable_df['duration_min'].mean():.0f} min (max: {stable_df['duration_min'].max():.0f})"
     )
 
-    print(f"\n  CLIMATE SETTINGS:")
+    print("\n  CLIMATE SETTINGS:")
     for room in ["erdgeschoss", "arbeitszimmer"]:
         if f"{room}_target" in stable_df.columns:
             target = stable_df[f"{room}_target"].mean()
             current = stable_df[f"{room}_current"].mean()
             print(f"    {room}: Ziel {target:.1f}°C, Ist {current:.1f}°C")
 
-    print(f"\n  PATH TEMPERATUREN:")
+    print("\n  PATH TEMPERATUREN:")
     for room in ["eg", "sz", "az", "kz", "ak"]:
         if f"path_{room}" in stable_df.columns:
             print(f"    {room}: {stable_df[f'path_{room}'].mean():.1f}°C")

@@ -5,11 +5,11 @@ Identifies transitions between stable and unstable states and correlates them
 with external factors like unit state changes, temperatures, and fan modes.
 """
 
-import pandas as pd
-import numpy as np
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
-import os
+
+import matplotlib.pyplot as plt
+import pandas as pd
+
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 

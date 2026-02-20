@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """Test the complete ClimatIQ pipeline with 30 days of real data."""
 
+
 import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from climatiq.core.observer import Observer
+
 from climatiq.core.analyzer import Analyzer
-from climatiq.core.controller import Controller, ActionType
-from climatiq.core.entities import OptimizerStatus, SystemMode, UnitStatus
+from climatiq.core.controller import ActionType, Controller
+from climatiq.core.entities import OptimizerStatus, SystemMode
+from climatiq.core.observer import Observer
 
 print("=" * 70)
 print("ClimatIQ v2 - Full Pipeline Test (30 Days)")
@@ -146,17 +146,17 @@ for _, obs in obs_df.iterrows():
 
 print(f"\nTotal high-risk situations: {(obs_df['cycling_risk'] > 0.6).sum()}")
 print(f"Actions decided: {len(decisions)}")
-print(f"\nAction breakdown:")
+print("\nAction breakdown:")
 action_types = pd.Series([d["action"] for d in decisions]).value_counts()
 for action, count in action_types.items():
     print(f"  • {action}: {count}")
 
-print(f"\nController Stats:")
+print("\nController Stats:")
 for key, val in controller.stats.items():
     print(f"  • {key}: {val}")
 
 # Sample decisions
-print(f"\nSample Actions (first 5):")
+print("\nSample Actions (first 5):")
 for d in decisions[:5]:
     print(f"  • {d['timestamp']}: {d['action']} - {d['reason'][:60]}")
 
@@ -180,13 +180,13 @@ stable_pct = (stable_time / len(df)) * 100
 low_power_stable = ((df["power_std"] < 50) & (df["value"] < 600)).sum()
 low_power_stable_pct = (low_power_stable / len(df)) * 100
 
-print(f"\n📊 Stability Metrics (30 days):")
+print("\n📊 Stability Metrics (30 days):")
 print(f"  • Stable time (Std Dev < 50W): {stable_pct:.1f}%")
 print(f"  • Low-power stable (<600W, stable): {low_power_stable_pct:.1f}%")
 print(f"  • Mean power: {df['value'].mean():.1f} W")
 print(f"  • Mean Std Dev: {df['power_std'].mean():.1f} W")
 
-print(f"\n🎯 Target Metrics:")
+print("\n🎯 Target Metrics:")
 print(
     f"  • >80% stable time: {'✅ PASS' if stable_pct > 80 else '❌ FAIL'} (current: {stable_pct:.1f}%)"
 )

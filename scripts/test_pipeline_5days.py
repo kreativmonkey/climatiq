@@ -2,11 +2,11 @@
 """Pipeline test with 5-day dataset (proven to work fast)."""
 
 import pandas as pd
-import numpy as np
+
 from climatiq.core.analyzer import Analyzer
-from climatiq.core.observer import Observer
-from climatiq.core.controller import Controller, ActionType
+from climatiq.core.controller import ActionType, Controller
 from climatiq.core.entities import OptimizerStatus, SystemMode
+from climatiq.core.observer import Observer
 
 print("=" * 70)
 print("ClimatIQ v2 - Pipeline Test (5 Days)")
@@ -32,7 +32,7 @@ print("=" * 70)
 analyzer = Analyzer()
 result = analyzer.analyze(df["value"])
 
-print(f"\n✓ Analysis complete")
+print("\n✓ Analysis complete")
 print(f"  Data sufficient: {result.sufficient_data}")
 print(f"  Data quality: {result.data_quality_score:.2f}")
 print(f"  Min stable power: {result.min_stable_power:.1f} W")
@@ -137,13 +137,13 @@ if actions:
     for act, cnt in action_counts.items():
         print(f"    • {act}: {cnt}")
 
-    print(f"\n  Sample actions:")
+    print("\n  Sample actions:")
     for detail in action_details[:5]:
         print(
             f"    • {detail['time'].strftime('%m-%d %H:%M')}: {detail['type']} - {detail['reason']}"
         )
 
-print(f"\n  Controller stats:")
+print("\n  Controller stats:")
 for k, v in controller.stats.items():
     print(f"    • {k}: {v}")
 
@@ -169,12 +169,12 @@ stable_pct = (stable_mask.sum() / len(df)) * 100
 low_power_stable = ((df["std"] < 50) & (df["value"] < 600)).sum()
 low_power_stable_pct = (low_power_stable / len(df)) * 100
 
-print(f"\n📊 Stability Metrics:")
+print("\n📊 Stability Metrics:")
 print(f"  • Stable time (Std<50W): {stable_pct:.1f}%")
 print(f"  • Low-power stable: {low_power_stable_pct:.1f}%")
 print(f"  • Mean Std Dev: {df['std'].mean():.1f}W")
 
-print(f"\n📈 Power Distribution:")
+print("\n📈 Power Distribution:")
 print(f"  • Mean: {df['value'].mean():.0f} W")
 print(f"  • Median: {df['value'].median():.0f} W")
 print(f"  • P25: {df['value'].quantile(0.25):.0f} W")
@@ -203,7 +203,7 @@ print(f"\nResults: {passed}/{total} checks passed\n")
 for check, result in checks:
     print(f"  {'✅' if result else '❌'} {check}")
 
-print(f"\n🎯 Target Metrics vs Actual:")
+print("\n🎯 Target Metrics vs Actual:")
 print(f"  • >80% stable: Target vs {stable_pct:.1f}% {'✅' if stable_pct > 80 else '⚠️ '}")
 print(
     f"  • >50% low-power: Target vs {low_power_stable_pct:.1f}% {'✅' if low_power_stable_pct > 50 else '⚠️ '}"

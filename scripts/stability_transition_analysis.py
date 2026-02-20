@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """Stabilitäts-Übergangs-Analyse mit korrekten Entity-Namen"""
 
-import pandas as pd
-import numpy as np
 import matplotlib
+import numpy as np
+import pandas as pd
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+
+import matplotlib.pyplot as plt
+
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 client = InfluxV1Client()
@@ -306,7 +308,7 @@ stable_df = pd.DataFrame(long_stable)
 
 if len(stable_df) > 0:
     print(f"Gefunden: {len(stable_df)} stabile Episoden (>30 min)\n")
-    print(f"Durchschnittliche stabile Konfiguration:")
+    print("Durchschnittliche stabile Konfiguration:")
     print(
         f"  Power: {stable_df['power_mean'].mean():.0f} W (Std: {stable_df['power_std'].mean():.1f} W)"
     )

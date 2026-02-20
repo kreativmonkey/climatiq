@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 """Sprint 3.2 V2: ML Feature Importance mit GMM-basiertem Labeling"""
 
-import pandas as pd
-import numpy as np
 import matplotlib
+import numpy as np
+import pandas as pd
 
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
 from datetime import datetime, timedelta
+
+import matplotlib.pyplot as plt
 from sklearn.ensemble import RandomForestClassifier
-from sklearn.preprocessing import StandardScaler
+from sklearn.metrics import classification_report, confusion_matrix
 from sklearn.mixture import GaussianMixture
 from sklearn.model_selection import train_test_split
-from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.preprocessing import StandardScaler
+
 from climatiq.data.influx_v1_client import InfluxV1Client
 
 client = InfluxV1Client()
@@ -153,7 +155,7 @@ df.loc[~df["gmm_cluster"].isin(stable_clusters) & (df["gmm_cluster"] >= 0), "lab
 df_ml = df[df["label_gmm"].isin(["stable", "unstable"])].copy()
 df_ml["target"] = (df_ml["label_gmm"] == "unstable").astype(int)
 
-print(f"\n--- ML DATASET ---")
+print("\n--- ML DATASET ---")
 print(f"  Stable: {(df_ml['target'] == 0).sum()}")
 print(f"  Unstable: {(df_ml['target'] == 1).sum()}")
 
@@ -243,7 +245,7 @@ print(classification_report(y_test, y_pred, target_names=["Stable", "Unstable"])
 
 cm = confusion_matrix(y_test, y_pred)
 print("\nConfusion Matrix:")
-print(f"                Predicted Stable  Predicted Unstable")
+print("                Predicted Stable  Predicted Unstable")
 print(f"Actual Stable        {cm[0][0]:6d}            {cm[0][1]:6d}")
 print(f"Actual Unstable      {cm[1][0]:6d}            {cm[1][1]:6d}")
 
@@ -278,7 +280,7 @@ colors = ["green" if c in stable_clusters else "red" for c in df_gmm["cluster"]]
 ax2.scatter(df_gmm["power"], df_gmm["power_std"], c=colors, alpha=0.3, s=5)
 ax2.set_xlabel("Power (W)")
 ax2.set_ylabel("Power Std (W)")
-ax2.set_title(f"GMM Clusters (Grün=Stabil)")
+ax2.set_title("GMM Clusters (Grün=Stabil)")
 ax2.grid(True, alpha=0.3)
 ax2.axhline(y=50, color="black", linestyle="--", alpha=0.5, label="Std=50W")
 ax2.legend()
@@ -358,7 +360,7 @@ feature_importance_df.to_csv(
 print("✓ Feature Importance exportiert: data/feature_importance_gmm.csv")
 
 print("\n✅ Sprint 3.2 V2 abgeschlossen!")
-print(f"\n🎯 KEY FINDINGS:")
+print("\n🎯 KEY FINDINGS:")
 print(f"  - Test Accuracy: {(y_pred == y_test).sum() / len(y_test):.1%}")
 print(
     f"  - Top Feature: {feature_importance_df.iloc[0]['feature']} ({feature_importance_df.iloc[0]['importance']:.3f})"
