@@ -31,6 +31,13 @@ class ClimatIQController(hass.Hass):
         self.unstable_zones = []
         self.stable_zones = []
 
+        # Cache-Pfad: entweder aus Config oder relativ zum Script-Verzeichnis
+        if "cache_path" in self.args:
+            self.cache_path = self.args["cache_path"]
+        else:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            self.cache_path = os.path.join(script_dir, "climatiq_zones_cache.json")
+
         # 1. Automatische Zonen-Erkennung beim Start
         self.log("=== ClimatIQ Controller V2 ===")
         self.log("Starte automatische Zonen-Erkennung...")
@@ -250,16 +257,15 @@ class ClimatIQController(hass.Hass):
 
     def _save_zones_cache(self):
         """Speichert erkannte Zonen in Cache-Datei"""
-        cache_path = "/config/appdaemon/apps/climatiq_zones_cache.json"
         cache = {
             "timestamp": datetime.now().isoformat(),
             "stable_zones": self.stable_zones,
             "unstable_zones": self.unstable_zones,
         }
         try:
-            with open(cache_path, "w") as f:
+            with open(self.cache_path, "w") as f:
                 json.dump(cache, f, indent=2)
-            self.log(f"Zonen-Cache gespeichert: {cache_path}")
+            self.log(f"Zonen-Cache gespeichert: {self.cache_path}")
         except Exception as e:
             self.log(f"Fehler beim Speichern des Cache: {e}", level="WARNING")
 
