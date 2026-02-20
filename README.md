@@ -58,6 +58,37 @@ climatiq/
 3. **Configure:**
    Edit `climatiq.yaml` to match your entities and InfluxDB credentials.
 
+### Development
+
+#### Using Nix Flakes (Recommended)
+The easiest way to get a reproducible development environment:
+
+```bash
+nix develop
+```
+
+This provides an isolated shell with Python 3.11, all dependencies (influxdb, scikit-learn, numpy, pandas, pydantic), and development tools (black, ruff, pytest, mypy).
+
+**Optional:** Use [direnv](https://direnv.net/) for automatic environment activation:
+```bash
+echo "use flake" > .envrc
+direnv allow
+```
+
+#### Manual Setup
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
+
+#### Running Tests
+```bash
+pytest                    # Run all tests
+black . && ruff check .   # Format & lint
+mypy climatiq/            # Type checking
+```
+
 ---
 
 <a name="deutsch"></a>
@@ -79,6 +110,30 @@ Beim Start analysiert die App die Leistungsdaten der letzten 30 Tage und erkennt
 - **Instabile Zonen**: Bereiche, die zu häufigem Ein-/Ausschalten führen.
 
 Der Controller nutzt diese Daten, um die Raumtemperaturen minimal anzupassen und das System so in einen stabilen Betriebsbereich zu lenken.
+
+### Entwicklung
+
+#### Mit Nix Flakes (Empfohlen)
+Der einfachste Weg für eine reproduzierbare Entwicklungsumgebung:
+
+```bash
+nix develop
+```
+
+Dies stellt eine isolierte Shell mit Python 3.11, allen Dependencies (influxdb, scikit-learn, numpy, pandas, pydantic) und Entwicklungstools (black, ruff, pytest, mypy) bereit.
+
+**Optional:** [direnv](https://direnv.net/) für automatische Aktivierung:
+```bash
+echo "use flake" > .envrc
+direnv allow
+```
+
+#### Manuelle Installation
+```bash
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+```
 
 ---
 
