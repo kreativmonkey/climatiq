@@ -58,12 +58,7 @@ jobs:
 
       - name: Run tests
         run: |
-          pytest tests/ -v --tb=short -x
-        continue-on-error: true  # Some legacy tests need updating
-
-      - name: Run core tests (must pass)
-        run: |
-          pytest tests/unit/test_observer.py tests/unit/test_controller_v2.py -v --tb=short
+          pytest tests/ -v --tb=short
 
   type-check:
     runs-on: ubuntu-latest
