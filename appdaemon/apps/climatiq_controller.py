@@ -38,6 +38,13 @@ class ClimatIQController(hass.Hass):
             script_dir = os.path.dirname(os.path.abspath(__file__))
             self.cache_path = os.path.join(script_dir, "climatiq_zones_cache.json")
 
+        # RL Log-Pfad: optional, Default relativ zum Script
+        if "log_file" in self.args:
+            self.log_file = self.args["log_file"]
+        else:
+            script_dir = os.path.dirname(os.path.abspath(__file__))
+            self.log_file = os.path.join(script_dir, "climatiq_rl.jsonl")
+
         # 1. Automatische Zonen-Erkennung beim Start
         self.log("=== ClimatIQ Controller V2 ===")
         self.log("Starte automatische Zonen-Erkennung...")
@@ -454,7 +461,7 @@ class ClimatIQController(hass.Hass):
     def log_episode(self, state: Dict, actions: List[Dict], reward: Dict):
         """Loggt Episode für RL Training (JSONL)"""
 
-        log_file = self.args.get("log_file", "/config/appdaemon/logs/climatiq_rl.jsonl")
+        log_file = self.log_file
 
         episode = {
             "timestamp": state["timestamp"],

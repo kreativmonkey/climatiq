@@ -12,8 +12,9 @@ climatiq_controller:
   # Interval (Minuten)
   interval_minutes: 5
   
-  # Log file für RL Training
-  log_file: /config/appdaemon/logs/climatiq_rl.jsonl
+  # Log file für RL Training (optional)
+  # Falls nicht gesetzt: climatiq_rl.jsonl im Script-Verzeichnis
+  # log_file: /config/appdaemon/logs/climatiq_rl.jsonl
   
   # Cache-Pfad für erkannte Zonen (optional)
   # Falls nicht gesetzt: wird automatisch neben der App gespeichert
