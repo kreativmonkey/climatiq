@@ -93,60 +93,131 @@ Build a self-learning system that prevents power consumption cycling in multi-sp
 
 ---
 
-### Sprint 3: Stability Analyzer Fix 🟡 PLANNED
+### Sprint 3: ML Feature Analysis & Causal Discovery ✅ COMPLETE (2026-02-19)
 
-**Goal**: Correctly identify stable operating regions, especially at low power
+**Goal**: Understand what CAUSES instability (not just symptoms)
 
-#### Current Problem
-- Analyzer uses clustering (DBSCAN) to find stable regions
-- Currently reports **1800W** as minimum stable power
-- Reality: System can be stable at **400-600W**
-- Hypothesis: Algorithm weights "duration" too heavily, ignores variance
+#### Evolution Through Versions
 
-#### Tasks
+**Sprint 3.1: Initial Feature Importance** ❌ FAILED (Circular reasoning)
+- Used `power_std`, `power_spread`, `power_gradient` as features
+- Result: ML said "power_std is most important" (99.4% accuracy)
+- Problem: These are SYMPTOMS not CAUSES (circular logic!)
 
-**3.1 Debug Current Analyzer** 
-- [ ] Log all clustering inputs (features, eps, min_samples)
-- [ ] Visualize clusters (scatter plot: power vs. std dev, colored by cluster)
-- [ ] Identify why low-power stable zones are ignored
+**Sprint 3.2 V1: Wrong Labeling** ❌ FAILED
+- Labels based on `power_std < 50W` without checking if system is ON
+- Result: 0W (system OFF) labeled as "stable" → completely wrong
+- Sebastian's correction: Stable range is ~400-600W, not 0-2000W
 
-**3.2 Revise Clustering Logic**
-- [ ] Add `power_std` as primary feature (stability = low variance)
-- [ ] Use `power_mean` as secondary feature (efficiency = low mean)
-- [ ] Experiment with DBSCAN parameters (eps, min_samples)
-- [ ] Consider alternative: Gaussian Mixture Models
+**Sprint 3.2 V2: Auto Stable Zones** ✅ IMPROVED
+- Automatic stable zone detection via GMM Clustering
+- Found: Multiple stable zones exist simultaneously!
+  - Cluster at ~519W (Std 9W) at moderate temps
+  - Cluster at ~1528W (Std 56W) at cold temps (<-2°C)
+- Key insight: Stability is NOT tied to fixed power range
 
-**3.3 Multi-Dimensional Stability**
-- [ ] Include temperature features (indoor/outdoor)
-- [ ] Include active_units count
-- [ ] Include fan_mode (if available)
-- [ ] Result: Stability zones = (power, temp, units, fan) combinations
+**Sprint 3.2 V3: Causal Analysis** ✅ FINAL
+- **Only external factors as features** (no symptoms!)
+- Test Accuracy: 91.6% (lower than 99.4%, but REAL!)
+- Top Causal Factors:
+  1. **power_level (19.7%)** - Some power levels inherently unstable
+  2. **delta_eg (9.5%)** - Living room temp deviation
+  3. **delta_kz_abs (7.6%)** - Kids room deviation
+  4. **total_delta_abs (7.5%)** - Total room deviation
+  5. **outdoor_temp (7.4%)** - Outdoor temperature
 
-**3.4 Validation**
-- [ ] Test with last 5 days of data
-- [ ] Manually verify identified stable zones
-- [ ] Confirm: Does analyzer now find 400-600W stable zones?
+#### Key Findings
 
-**3.5 Integration**
-- [ ] Update Controller to use new stability zones
-- [ ] Update Predictor features to include stability score
+**Critical Mistake Fixed:**
+- ❌ "Instability is caused by high power_std" (circular!)
+- ✅ "Instability is caused by: specific power levels, room temp deviations, outdoor temp"
 
-**Status**: 🟡 Not started  
-**ETA**: 2026-02-19–20 (2 days)  
-**Dependencies**: Sprint 2.4 (need validated historical data)
+**Room Temperatures ARE Relevant:**
+- Not as dominant as symptoms (power_std), but real causes
+- delta_eg + delta_kz_abs + total_delta_abs together: ~24% importance
+
+**Insights:**
+- Power 1000-1500W zone is inherently unstable
+- Outdoor temp <-5°C causes instability
+- total_delta > 5K causes instability
+- Nighttime (0-6h) more stable than daytime
+
+#### Deliverables
+- [x] `scripts/auto_stable_zones.py` - GMM-based zone detection
+- [x] `scripts/sprint3_2_v3_causal_analysis.py` - Causal factor analysis
+- [x] `data/feature_importance_causal.csv` - Causal factors export
+- [x] `data/sprint3_2_v3_causal.png` - Visualizations
+
+**Status**: ✅ Complete  
+**Duration**: 1 day (with 3 iterations to fix mistakes!)  
+**Files**: See `docs/PLAN.md` Sprint 3.2 section
 
 ---
 
-### Sprint 4: Controller Refinement 🟡 PLANNED
+### Sprint 4: Rule-based Controller ✅ COMPLETE (2026-02-19)
 
-**Goal**: Optimize control strategies for new stability definition
+**Goal**: Build intelligent controller with target-adjustment strategy
 
-#### Tasks
+#### Strategy
 
-**4.1 Action Strategy Updates**
-- [ ] **Load Balancing**: Bias toward configurations in known stable zones
-- [ ] **Temperature Modulation**: Use smaller steps (±0.3°C instead of ±0.5°C)
-- [ ] **Fan Control**: Avoid abrupt changes (gradual ramp)
+**Primary: Target Adjustment** (not stupid on/off switching!)
+- Adjust set temperatures intelligently
+- Let heat pump self-regulate
+- Only switch units when really needed
+
+**Secondary: Stability Constraints**
+- Avoid unstable power zones (1000-1500W)
+- Consider total_delta_abs
+- Use causal factors from Sprint 3.2 V3
+
+**Tertiary: RL Preparation**
+- Log State-Action-Reward for future reinforcement learning
+- Format: JSONL episodes
+
+#### Implementation
+
+**Components:**
+- [x] `climatiq/controller/rule_based_controller.py` - Main controller
+- [x] `config/controller_config.json` - Rules & room definitions
+- [x] `scripts/test_controller.py` - Dry-run testing
+- [x] `scripts/controller_daemon.py` - Continuous operation
+- [x] `docs/CONTROLLER.md` - Technical documentation
+- [x] `docs/SPRINT4.md` - User guide
+
+**Rules:**
+- Comfort: temp_tolerance_cold=-1.5K, temp_tolerance_warm=+1.0K
+- Adjustments: target_step=0.5°C, bounds=[16, 24]°C
+- Hysteresis: min_action_interval=15min (cooldown per room)
+- Stability: max_actions_per_cycle=2, avoid 1000-1500W zone
+
+**Reward Components** (for RL later):
+- Comfort Score: Sum of all |delta| (lower = better)
+- Stability Score: Penalty for unstable power zones
+- Energy Score: Power-based efficiency
+
+#### Next Steps
+
+**Sprint 4.1 (current):** ✅
+- [x] Rule-based controller implementation
+- [x] Target adjustment strategy
+- [x] Stability constraints
+- [x] State-Action-Reward logging
+
+**Sprint 4.2 (soon):**
+- [ ] 7-day test run
+- [ ] Baseline vs. Controller comparison
+- [ ] Rules tuning based on results
+- [ ] Metrics dashboard
+
+**Status**: ✅ Core complete, awaiting test run  
+**Duration**: 1 day  
+**Dependencies**: Sprint 3.2 V3 (causal factors)
+
+---
+
+### Sprint 5: Reinforcement Learning 🟡 PLANNED
+
+**Goal**: Train RL agent on historical logs, replace rule-based controller
 - [ ] **Preemptive Buffering**: Activate buffer zones before cycling risk peaks
 
 **4.2 Night Mode** ⭐ NEW

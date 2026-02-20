@@ -1,0 +1,63 @@
+{
+  "method": "gmm",
+  "clusters": [
+    {
+      "cluster": 2,
+      "size": 242,
+      "power_mean": 694.8660015896098,
+      "power_median": 744.0025785278949,
+      "power_std_mean": 4.8369054838168495,
+      "power_std_median": 2.2343070322840517,
+      "outdoor_temp_mean": 3.5721699134199136
+    },
+    {
+      "cluster": 1,
+      "size": 437,
+      "power_mean": 1508.2779119565648,
+      "power_median": 1500.71875,
+      "power_std_mean": 68.31214786629204,
+      "power_std_median": 67.48532197543473,
+      "outdoor_temp_mean": -2.420176528277215
+    },
+    {
+      "cluster": 4,
+      "size": 452,
+      "power_mean": 1143.506486080136,
+      "power_median": 1128.73567251462,
+      "power_std_mean": 225.41713811382402,
+      "power_std_median": 216.11486798837083,
+      "outdoor_temp_mean": 1.0864269911504425
+    },
+    {
+      "cluster": 5,
+      "size": 250,
+      "power_mean": 1690.9870886584517,
+      "power_median": 1646.098484848485,
+      "power_std_mean": 228.42821620776357,
+      "power_std_median": 248.62131296449797,
+      "outdoor_temp_mean": -1.3225142857142858
+    },
+    {
+      "cluster": 0,
+      "size": 319,
+      "power_mean": 571.3075921273178,
+      "power_median": 572.2608695652174,
+      "power_std_mean": 282.00891821892156,
+      "power_std_median": 294.4854828364011,
+      "outdoor_temp_mean": 2.59403381101657
+    },
+    {
+      "cluster": 3,
+      "size": 83,
+      "power_mean": 1925.496699098299,
+      "power_median": 1865.6829268292684,
+      "power_std_mean": 691.479653329012,
+      "power_std_median": 668.2552323820443,
+      "outdoor_temp_mean": -1.3780722891566266
+    }
+  ],
+  "quantile_threshold": 54.71015451781465,
+  "stable_clusters": [
+    2
+  ]
+}

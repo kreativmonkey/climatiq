@@ -1,7 +1,8 @@
 # Data handling
 pandas>=2.0.0
 numpy>=1.24.0
-influxdb-client>=1.36.0
+influxdb>=5.3.0          # InfluxDB v1 client
+influxdb-client>=1.36.0  # InfluxDB v2 client (optional)
 
 # Machine Learning
 scikit-learn>=1.3.0

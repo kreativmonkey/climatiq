@@ -1,0 +1,70 @@
+# ClimatIQ Controller V2 - AppDaemon Configuration
+#
+# AUTOMATISCHE ZONEN-ERKENNUNG: 
+# Der Controller lernt beim Start (und täglich um 03:00) automatisch
+# welche Power-Bereiche stabil/instabil sind via GMM Clustering.
+# Du musst KEINE Zonen manuell konfigurieren!
+
+climatiq_controller:
+  module: climatiq_controller
+  class: ClimatIQController
+  
+  # Interval (Minuten)
+  interval_minutes: 5
+  
+  # Log file für RL Training
+  log_file: /config/appdaemon/logs/climatiq_rl.jsonl
+  
+  # InfluxDB für historische Daten (Zonen-Erkennung)
+  # Falls nicht konfiguriert: nutzt HA History (nur 7 Tage)
+  influxdb:
+    host: localhost
+    port: 8086
+    database: homeassistant
+    measurement: W
+    power_entity: ac_current_energy
+  
+  # Sensoren
+  sensors:
+    power: sensor.ac_current_energy
+    outdoor_temp: sensor.ac_temperatur_outdoor
+  
+  # Räume
+  rooms:
+    erdgeschoss:
+      temp_sensor: sensor.temperatur_wohnzimmer
+      climate_entity: climate.panasonic_climate_erdgeschoss
+    
+    schlafzimmer:
+      temp_sensor: sensor.temperatur_flur_og
+      climate_entity: climate.panasonic_climate_schlafzimmer
+    
+    arbeitszimmer:
+      temp_sensor: sensor.rwm_arbeitszimmer_temperature
+      climate_entity: climate.panasonic_climate_arbeitszimmer
+    
+    kinderzimmer:
+      temp_sensor: sensor.0x000d6f0019c90b85_temperature
+      climate_entity: climate.panasonic_climate_kinderzimmer
+    
+    ankleide:
+      temp_sensor: sensor.temperatur_flur_og
+      climate_entity: climate.panasonic_climate_ankleide
+  
+  # Regeln (KEINE instabilen Zonen - werden automatisch erkannt!)
+  rules:
+    comfort:
+      temp_tolerance_cold: 1.5    # Unter -1.5K vom Target → Action
+      temp_tolerance_warm: 1.0    # Über +1.0K vom Target → Action
+    
+    adjustments:
+      target_step: 0.5            # Schrittweite pro Anpassung (°C)
+      target_min: 16.0            # Minimum erlaubtes Target
+      target_max: 24.0            # Maximum erlaubtes Target
+    
+    hysteresis:
+      min_action_interval_minutes: 15  # Cooldown pro Raum
+    
+    stability:
+      max_actions_per_cycle: 2    # Max gleichzeitige Anpassungen
+      # KEINE unstable_power_min/max mehr - wird automatisch erkannt!

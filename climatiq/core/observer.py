@@ -100,48 +100,46 @@ class Observer:
 
     def _analyze_cycling(self):
         """Detect cycling using on/off cycles, fluctuations **and** power jumps.
-
-        Sets ``is_cycling``, ``cycling_risk`` and the internal
-        ``_instability_score`` / ``_recent_jumps``.
+        
+        Optimized for performance: uses pre-calculated window metrics.
         """
-        if len(self._power_history) < 10:
+        if len(self._power_history) < 5:
             return
 
-        series = pd.Series(
-            [v for _, v in self._power_history],
-            index=pd.DatetimeIndex([t for t, _ in self._power_history]),
-        )
+        # Optimization: use pre-converted numpy array for metrics if possible
+        # or limit pandas conversion to the actual window we need
+        recent_values = [v for _, v in self._power_history[-20:]]
+        
+        # Fast metrics calculation using numpy
+        vals = np.array(recent_values)
+        mean_p = np.mean(vals)
+        std_p = np.std(vals)
+        spread = np.max(vals) - np.min(vals)
+        
+        # Fast jump detection
+        diffs = np.abs(np.diff(vals))
+        jumps = np.sum(diffs > 200)
 
-        # --- Traditional on/off cycle analysis (backward compatible) ---
-        analysis = self.detector.analyze_cycling(series)
-        has_short_cycles = analysis["short_cycle_count"] > 0
+        # Compute Risk Score v2 (Variance-based)
+        # 1. StdDev contribution: 50W std -> 40% risk
+        risk_std = (std_p / 125.0) 
+        # 2. Spread contribution: 400W spread -> 40% risk
+        risk_spread = (spread / 1000.0)
+        # 3. Jump contribution: 2 jumps -> 20% risk
+        risk_jumps = (jumps / 10.0)
 
-        # --- Fluctuation analysis ---
-        fluctuations = self.detector.detect_fluctuations(series)
-        has_fluctuations = len(fluctuations) > 0
+        total_risk = (risk_std * 0.4) + (risk_spread * 0.4) + (risk_jumps * 0.2)
+        
+        self._instability_score = float(np.clip(total_risk, 0.0, 1.0))
+        self.status.is_cycling = self._instability_score > 0.6
+        self.status.cycling_risk = round(self._instability_score, 2)
 
-        # --- Power jump analysis (last 10 minutes) ---
-        all_jumps = self.detector.detect_power_jumps(series)
-
-        cutoff = series.index[-1] - pd.Timedelta(minutes=10)
-        recent_jumps = [(ts, delta) for (ts, delta) in all_jumps if ts >= cutoff]
-        self._recent_jumps = recent_jumps
-
-        # --- Compute instability score (0.0 – 1.0) ---
-        self._instability_score = self._compute_instability_score(series, recent_jumps)
-
-        # --- Determine is_cycling ---
-        # True if *any* significant instability source fires
-        self.status.is_cycling = (
-            has_short_cycles
-            or has_fluctuations
-            or self._instability_score > 0.5
-        )
-
-        # --- cycling_risk derived from instability_score ---
-        self.status.cycling_risk = round(
-            min(1.0, max(0.0, self._instability_score)), 2
-        )
+        # Update jumps list for dashboard (maintain backward compatibility)
+        ts_last = self._power_history[-1][0]
+        if diffs.size > 0 and diffs[-1] > 200:
+            self._recent_jumps.append((ts_last, diffs[-1]))
+            if len(self._recent_jumps) > 10:
+                self._recent_jumps.pop(0)
 
     @staticmethod
     def _compute_instability_score(
