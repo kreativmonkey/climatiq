@@ -93,7 +93,7 @@ class ClimatIQController(hass.Hass):
     def _load_influx_history(self) -> Optional[List[Dict]]:
         """Lädt Power-Historie aus InfluxDB"""
 
-        # InfluxDB v1 Query
+        # InfluxDB v1 Client importieren
         from influxdb import InfluxDBClient
 
         cfg = self.influx_config
@@ -104,6 +104,8 @@ class ClimatIQController(hass.Hass):
         client = InfluxDBClient(
             host=cfg.get("host", "localhost"),
             port=cfg.get("port", 8086),
+            username=cfg.get("username"),
+            password=cfg.get("password"),
             database=cfg.get("database", "homeassistant"),
         )
 
