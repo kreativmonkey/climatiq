@@ -15,6 +15,10 @@ climatiq_controller:
   # Log file für RL Training
   log_file: /config/appdaemon/logs/climatiq_rl.jsonl
   
+  # Cache-Pfad für erkannte Zonen (optional)
+  # Falls nicht gesetzt: wird automatisch neben der App gespeichert
+  # cache_path: /config/appdaemon/apps/climatiq_zones_cache.json
+  
   # InfluxDB für historische Daten (Zonen-Erkennung)
   # Falls nicht konfiguriert: nutzt HA History (nur 7 Tage)
   influxdb:
