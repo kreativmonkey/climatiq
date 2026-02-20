@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -46,7 +46,7 @@ class CyclingPredictor:
     # Minimum state changes per hour to count as cycling
     CYCLING_THRESHOLD_CHANGES_PER_HOUR = 4
 
-    def __init__(self, model_path: Optional[Path | str] = None):
+    def __init__(self, model_path: Path | str | None = None):
         """Initialize the predictor.
 
         Args:
@@ -146,12 +146,7 @@ class CyclingPredictor:
         # Count state changes in the forward-looking window using a reversed
         # rolling sum: reverse the series, apply rolling sum, then reverse back.
         # This effectively sums the *next* ``window`` values for each position.
-        forward_changes = (
-            changes.iloc[::-1]
-            .rolling(window, min_periods=1)
-            .sum()
-            .iloc[::-1]
-        )
+        forward_changes = changes.iloc[::-1].rolling(window, min_periods=1).sum().iloc[::-1]
 
         # Convert a per-hour threshold into a threshold for the window.
         # Example: 4 changes/hour over a 10-minute window ≈ 0.67 → threshold 1.
@@ -226,9 +221,7 @@ class CyclingPredictor:
             }
 
             # Feature importance
-            self._feature_importance = dict(
-                zip(X.columns, model.feature_importances_)
-            )
+            self._feature_importance = dict(zip(X.columns, model.feature_importances_))
 
             logger.info(
                 "Model trained: F1=%.3f ± %.3f on %d samples",

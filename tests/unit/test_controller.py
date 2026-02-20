@@ -130,7 +130,9 @@ class TestController:
 
         assert action.action_type == ActionType.NO_ACTION
 
-    def test_decide_action_no_action_stable_low_risk(self, controller, active_status, analysis_data):
+    def test_decide_action_no_action_stable_low_risk(
+        self, controller, active_status, analysis_data
+    ):
         """Test no action when cycling_predicted=False, risk<0.5, instability_high absent."""
         active_status.cycling_risk = 0.3
         prediction = {"cycling_predicted": False, "probability": 0.2}
@@ -168,9 +170,7 @@ class TestController:
         """Test load balancing triggers on high power_std even if power >= min_stable."""
         active_status.power_consumption = 500.0  # Above min_stable_power (450)
 
-        action = controller.decide_action(
-            active_status, cycling_prediction, analysis_data_high_std
-        )
+        action = controller.decide_action(active_status, cycling_prediction, analysis_data_high_std)
 
         # power_std=200 > 150 threshold → load balancing should still activate
         assert action.action_type == ActionType.ENABLE_UNIT
@@ -298,9 +298,7 @@ class TestController:
         self, controller, active_status, cycling_prediction, analysis_data_high_std
     ):
         """Test that load balancing reason includes power_std (σ) info."""
-        action = controller.decide_action(
-            active_status, cycling_prediction, analysis_data_high_std
-        )
+        action = controller.decide_action(active_status, cycling_prediction, analysis_data_high_std)
         assert "σ=" in action.reason
 
     def test_instability_from_analysis(self, controller, active_status, analysis_data):

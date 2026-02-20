@@ -6,13 +6,13 @@ from climatiq.core.analyzer import Analyzer
 import os
 
 # Load data
-data_path = '/home/diyon/.openclaw/workspace/climatiq/data/power_last_5days.csv'
+data_path = "/home/diyon/.openclaw/workspace/climatiq/data/power_last_5days.csv"
 if not os.path.exists(data_path):
     print("Data file not found!")
     exit(1)
 
 df = pd.read_csv(data_path, index_col=0, parse_dates=True)
-power_series = df['value']
+power_series = df["value"]
 
 print(f"Analyzing {len(df)} datapoints with new Analyzer v2...")
 

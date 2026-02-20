@@ -3,14 +3,14 @@ requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "climatiq-control"
-version = "0.1.0"
-description = "Intelligent HVAC control to prevent compressor short-cycling"
+name = "climatiq"
+version = "3.0.0"
+description = "Intelligent heat pump control with ML-based zone detection"
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.11"
 authors = [
-    {name = "ClimatIQ Contributors"}
+    {name = "Sebastian Müller", email = "github@kreativmonkey.de"}
 ]
 keywords = ["home-assistant", "hvac", "heat-pump", "machine-learning", "appdaemon"]
 classifiers = [
@@ -26,12 +26,12 @@ classifiers = [
 dependencies = [
     "pandas>=2.0.0",
     "numpy>=1.24.0",
+    "influxdb>=5.3.0",
     "influxdb-client>=1.36.0",
+    "scikit-learn>=1.3.0",
     "joblib>=1.3.0",
     "python-dotenv>=1.0.0",
     "pyyaml>=6.0",
-    "pydantic>=2.0.0",
-    "pydantic-settings>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -54,10 +54,10 @@ appdaemon = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/YOUR_USERNAME/climatiq"
-Documentation = "https://github.com/YOUR_USERNAME/climatiq#readme"
-Repository = "https://github.com/YOUR_USERNAME/climatiq.git"
-Issues = "https://github.com/YOUR_USERNAME/climatiq/issues"
+Homepage = "https://github.com/kreativmonkey/climatiq"
+Documentation = "https://github.com/kreativmonkey/climatiq#readme"
+Repository = "https://github.com/kreativmonkey/climatiq.git"
+Issues = "https://github.com/kreativmonkey/climatiq/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]
@@ -70,8 +70,12 @@ target-version = ["py311", "py312", "py313"]
 [tool.ruff]
 line-length = 100
 target-version = "py311"
-select = ["E", "F", "I", "N", "W", "UP"]
-ignore = ["E501"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+ignore = [
+    "E501",  # Line too long (handled by black)
+]
 
 [tool.mypy]
 python_version = "3.11"

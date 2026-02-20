@@ -116,7 +116,9 @@ class TestAnalyzer:
         """
         np.random.seed(123)
         times = pd.date_range(
-            start=datetime.now(UTC) - timedelta(hours=48), periods=48 * 60, freq="1min",
+            start=datetime.now(UTC) - timedelta(hours=48),
+            periods=48 * 60,
+            freq="1min",
         )
         # Perfectly stable at ~500W
         power = np.random.normal(500, 15, len(times))
@@ -180,7 +182,8 @@ class TestCyclingDetectionColumns:
         """power_jumps should be 0 or 1."""
         times = pd.date_range("2024-01-01", periods=10, freq="1min")
         df = pd.DataFrame(
-            {"power": [500, 500, 900, 900, 500, 500, 900, 900, 500, 500]}, index=times,
+            {"power": [500, 500, 900, 900, 500, 500, 900, 900, 500, 500]},
+            index=times,
         )
         result = analyzer._add_cycling_detection(df)
         assert set(result["power_jumps"].unique()).issubset({0, 1})

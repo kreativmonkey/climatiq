@@ -5,7 +5,7 @@ including frequent large power fluctuations (Takten), not just on/off cycling.
 """
 
 import logging
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Any
 
 import numpy as np
@@ -100,7 +100,7 @@ class Observer:
 
     def _analyze_cycling(self):
         """Detect cycling using on/off cycles, fluctuations **and** power jumps.
-        
+
         Optimized for performance: uses pre-calculated window metrics.
         """
         if len(self._power_history) < 5:
@@ -109,27 +109,26 @@ class Observer:
         # Optimization: use pre-converted numpy array for metrics if possible
         # or limit pandas conversion to the actual window we need
         recent_values = [v for _, v in self._power_history[-20:]]
-        
+
         # Fast metrics calculation using numpy
         vals = np.array(recent_values)
-        mean_p = np.mean(vals)
         std_p = np.std(vals)
         spread = np.max(vals) - np.min(vals)
-        
+
         # Fast jump detection
         diffs = np.abs(np.diff(vals))
         jumps = np.sum(diffs > 200)
 
         # Compute Risk Score v2 (Variance-based)
         # 1. StdDev contribution: 50W std -> 40% risk
-        risk_std = (std_p / 125.0) 
+        risk_std = std_p / 125.0
         # 2. Spread contribution: 400W spread -> 40% risk
-        risk_spread = (spread / 1000.0)
+        risk_spread = spread / 1000.0
         # 3. Jump contribution: 2 jumps -> 20% risk
-        risk_jumps = (jumps / 10.0)
+        risk_jumps = jumps / 10.0
 
         total_risk = (risk_std * 0.4) + (risk_spread * 0.4) + (risk_jumps * 0.2)
-        
+
         self._instability_score = float(np.clip(total_risk, 0.0, 1.0))
         self.status.is_cycling = self._instability_score > 0.6
         self.status.cycling_risk = round(self._instability_score, 2)

@@ -1,7 +1,7 @@
 """Detect compressor cycling and fluctuation patterns from power data."""
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
@@ -227,9 +227,7 @@ class CyclingDetector:
 
         return events
 
-    def detect_power_jumps(
-        self, power_series: pd.Series
-    ) -> list[tuple[pd.Timestamp, float]]:
+    def detect_power_jumps(self, power_series: pd.Series) -> list[tuple[pd.Timestamp, float]]:
         """Detect rapid jumps in power consumption.
 
         Backward-compatible return type for unit tests: list of (timestamp, delta_watts).
@@ -284,9 +282,7 @@ class CyclingDetector:
         durations = [c.duration_minutes for c in cycles]
         instability_scores = self.calculate_instability_score(power_series)
 
-        time_span_hours = (
-            power_series.index[-1] - power_series.index[0]
-        ).total_seconds() / 3600
+        time_span_hours = (power_series.index[-1] - power_series.index[0]).total_seconds() / 3600
 
         return {
             "cycles": cycles,
