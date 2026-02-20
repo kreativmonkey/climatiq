@@ -14,12 +14,12 @@ def main():
     print("=" * 60)
     print("HVAC Optimizer - InfluxDB Connection Test")
     print("=" * 60)
-    
+
     loader = HVACDataLoader()
-    
+
     print(f"\nConnecting to: {loader.url}")
     print(f"Bucket/Database: {loader.bucket}")
-    
+
     # Test connection
     print("\nTesting connection...", end=" ")
     if loader.test_connection():
@@ -28,12 +28,12 @@ def main():
         print("✗ FAILED")
         print("\nPlease check your .env file and InfluxDB server.")
         return 1
-    
+
     # List measurements
     print("\n" + "-" * 40)
     print("Available measurements:")
     print("-" * 40)
-    
+
     measurements = loader.list_measurements()
     if measurements:
         for m in measurements[:30]:  # Show first 30
@@ -42,18 +42,15 @@ def main():
             print(f"  ... and {len(measurements) - 30} more")
     else:
         print("  No measurements found (or query failed)")
-    
+
     # Look for climate/HVAC related measurements
     print("\n" + "-" * 40)
     print("Looking for HVAC-related data...")
     print("-" * 40)
-    
+
     hvac_keywords = ["climate", "hvac", "temperature", "temp", "power", "energy", "heat", "cool"]
-    hvac_measurements = [
-        m for m in measurements 
-        if any(kw in m.lower() for kw in hvac_keywords)
-    ]
-    
+    hvac_measurements = [m for m in measurements if any(kw in m.lower() for kw in hvac_keywords)]
+
     if hvac_measurements:
         print("Found potentially relevant measurements:")
         for m in hvac_measurements[:20]:
@@ -67,7 +64,7 @@ def main():
     else:
         print("No obvious HVAC measurements found.")
         print("Please check measurement names manually.")
-    
+
     loader.close()
     print("\n" + "=" * 60)
     print("Connection test complete!")

@@ -6,9 +6,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from climatiq.analysis.cycling_detector import CyclingDetector
 from climatiq.core.entities import SystemMode
 from climatiq.core.observer import Observer
-from climatiq.analysis.cycling_detector import CyclingDetector
 
 
 @pytest.fixture
@@ -167,9 +167,7 @@ class TestCyclingDetectorV2:
     def test_analyze_cycling_compatibility(self, detector):
         """Ensure analyze_cycling still returns expected keys."""
         times = pd.date_range("2024-01-01", periods=10, freq="1min")
-        series = pd.Series(
-            [100, 500, 500, 100, 100, 500, 500, 100, 100, 100], index=times
-        )
+        series = pd.Series([100, 500, 500, 100, 100, 500, 500, 100, 100, 100], index=times)
 
         analysis = detector.analyze_cycling(series)
         assert "cycles" in analysis

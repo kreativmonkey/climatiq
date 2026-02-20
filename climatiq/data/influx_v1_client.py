@@ -104,14 +104,18 @@ class InfluxV1Client:
         for meas in measurements_to_try:
             if resample:
                 # Convert resample string to InfluxQL format
-                q = f"""SELECT mean("value") as value FROM "{meas}" 
-                        WHERE "entity_id" = '{entity_id}' 
-                        AND time >= '{start_str}' AND time <= '{end_str}' 
-                        GROUP BY time({resample}) fill(none)"""
+                q = (
+                    f'SELECT mean("value") as value FROM "{meas}" '
+                    f"WHERE \"entity_id\" = '{entity_id}' "
+                    f"AND time >= '{start_str}' AND time <= '{end_str}' "
+                    f"GROUP BY time({resample}) fill(none)"
+                )
             else:
-                q = f"""SELECT "value" FROM "{meas}" 
-                        WHERE "entity_id" = '{entity_id}' 
-                        AND time >= '{start_str}' AND time <= '{end_str}' """
+                q = (
+                    f'SELECT "value" FROM "{meas}" '
+                    f"WHERE \"entity_id\" = '{entity_id}' "
+                    f"AND time >= '{start_str}' AND time <= '{end_str}'"
+                )
 
             result = self._query(q)
 
