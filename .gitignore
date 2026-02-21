@@ -18,14 +18,27 @@ ENV/
 dist/
 build/
 
-# Data & Models (too large for git)
+# Data & Models (generated artifacts, not tracked)
 data/raw/
 data/exports/
+data/*.png
+data/*.csv
+data/*.json
+data/*.parquet
 models/*.pkl
 models/*.h5
 models/*.joblib
-*.csv
-*.parquet
+
+# Global CSV/Parquet in root and scripts (not docs)
+/*.csv
+/*.parquet
+scripts/*.csv
+scripts/*.parquet
+
+# Archives & Backups
+*.tar.gz
+*.zip
+*.bak
 
 # IDE
 .idea/

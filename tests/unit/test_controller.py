@@ -6,6 +6,7 @@ Tests marked with @pytest.mark.skip need updating to match the new API.
 """
 
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -312,12 +313,21 @@ class TestController:
         assert data["stats"]["cycles_prevented"] == 3
         assert "recent_actions" in data
 
-    def test_load_balancing_reason_includes_sigma(
-        self, controller, active_status, cycling_prediction, analysis_data_high_std
+    @patch("climatiq.core.controller.Controller.is_night_mode", return_value=False)
+    def test_load_balancing_daytime(
+        self, mock_night_mode, controller, active_status, cycling_prediction, analysis_data_high_std
     ):
-        """Test that load balancing reason includes power_std (σ) info."""
+        """Test that load balancing reason includes power_std (σ) info during daytime."""
         action = controller.decide_action(active_status, cycling_prediction, analysis_data_high_std)
         assert "σ=" in action.reason
+
+    @patch("climatiq.core.controller.Controller.is_night_mode", return_value=True)
+    def test_load_balancing_nighttime(
+        self, mock_night_mode, controller, active_status, cycling_prediction, analysis_data_high_std
+    ):
+        """Test that night mode activates during night hours (23:00-06:00)."""
+        action = controller.decide_action(active_status, cycling_prediction, analysis_data_high_std)
+        assert "Night Mode" in action.reason
 
     def test_instability_from_analysis(self, controller, active_status, analysis_data):
         """Test that instability_high in analysis dict is respected."""

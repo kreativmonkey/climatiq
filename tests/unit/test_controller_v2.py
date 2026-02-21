@@ -1,6 +1,7 @@
 """Unit tests for Controller v2 (Sprint 4)."""
 
 from datetime import UTC, datetime
+from unittest.mock import patch
 
 import pytest
 
@@ -60,8 +61,9 @@ def test_should_act_respects_mode(controller):
     assert controller.should_act(status)
 
 
-def test_stability_targeting_activates_unit(controller, mock_units):
-    """Test that stability targeting activates an inactive unit."""
+@patch("climatiq.core.controller.Controller.is_night_mode", return_value=False)
+def test_stability_targeting_daytime(mock_night_mode, controller, mock_units):
+    """Test that stability targeting activates an inactive unit during daytime."""
     status = OptimizerStatus(
         power_consumption=450,  # Below min_stable
         cycling_risk=0.75,
@@ -78,6 +80,27 @@ def test_stability_targeting_activates_unit(controller, mock_units):
     assert action.action_type == ActionType.ENABLE_UNIT
     assert action.target_unit in ["schlafzimmer", "arbeitszimmer"]
     assert "Stabilitäts-Targeting" in action.reason
+
+
+@patch("climatiq.core.controller.Controller.is_night_mode", return_value=True)
+def test_stability_targeting_nighttime(mock_night_mode, controller, mock_units):
+    """Test that night mode activates an inactive unit during night hours (23:00-06:00)."""
+    status = OptimizerStatus(
+        power_consumption=450,  # Below min_stable
+        cycling_risk=0.75,
+        mode=SystemMode.ACTIVE,
+        units=mock_units,
+        timestamp=datetime.now(UTC),
+    )
+
+    prediction = {"cycling_predicted": True, "probability": 0.75}
+    analysis = {"min_stable_power": 550, "power_std": 110, "power_spread": 420}
+
+    action = controller.decide_action(status, prediction, analysis)
+
+    assert action.action_type == ActionType.ENABLE_UNIT
+    assert action.target_unit in ["schlafzimmer", "arbeitszimmer"]
+    assert "Night Mode" in action.reason
 
 
 def test_gradual_nudge_small_adjustment(controller, mock_units):
