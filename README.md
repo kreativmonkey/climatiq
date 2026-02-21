@@ -47,62 +47,96 @@ Upon startup, it analyzes the last 30 days of heat pump power data to identify:
 
 The controller then uses these insights to nudge room temperatures, steering the system toward stable operation.
 
-### Project Structure
+### 🚀 Quick Installation (Home Assistant)
+
+**You only need 2 files!**
+
+#### Requirements
+- Home Assistant with AppDaemon Add-on installed
+- InfluxDB (for historical data analysis)
+
+#### Installation Steps
+
+1. **Download the controller files:**
+   - [`appdaemon/apps/climatiq_controller.py`](appdaemon/apps/climatiq_controller.py) - The controller code
+   - [`appdaemon/apps/climatiq.yaml`](appdaemon/apps/climatiq.yaml) - Configuration template
+
+2. **Copy to Home Assistant:**
+   ```bash
+   # Place files in your AppDaemon apps directory
+   /config/appdaemon/apps/climatiq_controller.py
+   /config/appdaemon/apps/climatiq.yaml
+   ```
+
+3. **Configure:** Edit `climatiq.yaml` with your entity IDs
+4. **Restart:** AppDaemon Add-on
+5. **Done!** Check logs: `/config/appdaemon/appdaemon.log`
+
+**Full setup guide:** See [docs/APPDAEMON_SETUP.md](docs/APPDAEMON_SETUP.md)
+
+---
+
+### 📁 Project Structure
+
+**What each folder is for:**
 
 ```
 climatiq/
-├── appdaemon/apps/          # Home Assistant AppDaemon Integration
-│   ├── climatiq_controller.py   # Main Controller App
-│   └── climatiq.yaml            # Configuration
-├── climatiq/                # Core Logic
-│   ├── controller/          # Rule-based logic
-│   ├── analysis/            # Cycling detection & ML
-│   └── data/                # InfluxDB connectors
-├── scripts/                 # Analysis & Utility scripts
-└── docs/                    # Detailed documentation
+├── appdaemon/apps/          # ← HOME ASSISTANT USERS: Copy these 2 files!
+│   ├── climatiq_controller.py   # The controller (copy to HA)
+│   └── climatiq.yaml             # Config template (copy to HA)
+│
+├── climatiq/                # ← DEVELOPERS ONLY: Python package
+│   ├── core/                    # Controller classes (for testing)
+│   ├── data/                    # InfluxDB client
+│   ├── models/                  # ML models (future RL)
+│   └── analysis/                # Analysis tools
+│
+├── tests/                   # ← DEVELOPERS ONLY: Unit tests
+├── scripts/                 # ← OPTIONAL: Analysis scripts
+├── docs/                    # ← REFERENCE: Documentation
+├── data/                    # ← REFERENCE: Research artifacts
+└── models/                  # ← FUTURE: Trained ML models
 ```
 
-### Installation
+**Key takeaway:**
+- **Home Assistant users:** Only need `appdaemon/apps/` (2 files)
+- **Developers:** Need full repo for testing/development
+- **`climatiq/` folder:** Python package for development, NOT for Home Assistant
 
-1. **Clone the repository:**
-   ```bash
-   git clone https://github.com/kreativmonkey/climatiq.git
-   ```
-2. **Setup AppDaemon:**
-   Copy the contents of `appdaemon/apps/` to your Home Assistant `/config/appdaemon/apps/` directory.
-3. **Configure:**
-   Edit `climatiq.yaml` to match your entities and InfluxDB credentials.
+---
 
-### Development
+### 🛠️ Development Setup
 
-#### Using Nix Flakes (Recommended)
-The easiest way to get a reproducible development environment:
+**For developers who want to work on the code:**
 
+#### Clone Repository
 ```bash
-nix develop
+git clone https://github.com/kreativmonkey/climatiq.git
+cd climatiq
 ```
 
-This provides an isolated shell with Python 3.11, all dependencies (influxdb, scikit-learn, numpy, pandas, pydantic), and development tools (black, ruff, pytest, mypy).
+#### Setup Development Environment
 
-**Optional:** Use [direnv](https://direnv.net/) for automatic environment activation:
+**Option A: Nix (Recommended)**
 ```bash
 echo "use flake" > .envrc
 direnv allow
 ```
 
-#### Manual Setup
+**Option B: Manual**
 ```bash
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-#### Running Tests
+#### Run Tests
 ```bash
-pytest                    # Run all tests
-black . && ruff check .   # Format & lint
-mypy climatiq/            # Type checking
+pytest tests/ -v
 ```
+
+**For comprehensive development documentation, see [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 
 ---
 
@@ -141,29 +175,96 @@ Beim Start analysiert die App die Leistungsdaten der letzten 30 Tage und erkennt
 
 Der Controller nutzt diese Daten, um die Raumtemperaturen minimal anzupassen und das System so in einen stabilen Betriebsbereich zu lenken.
 
-### Entwicklung
+### 🚀 Schnell-Installation (Home Assistant)
 
-#### Mit Nix Flakes (Empfohlen)
-Der einfachste Weg für eine reproduzierbare Entwicklungsumgebung:
+**Du brauchst nur 2 Dateien!**
 
-```bash
-nix develop
+#### Voraussetzungen
+- Home Assistant mit AppDaemon Add-on
+- InfluxDB (für historische Datenanalyse)
+
+#### Installations-Schritte
+
+1. **Controller-Dateien herunterladen:**
+   - [`appdaemon/apps/climatiq_controller.py`](appdaemon/apps/climatiq_controller.py) - Der Controller-Code
+   - [`appdaemon/apps/climatiq.yaml`](appdaemon/apps/climatiq.yaml) - Konfigurations-Template
+
+2. **Nach Home Assistant kopieren:**
+   ```bash
+   # Dateien ins AppDaemon apps-Verzeichnis
+   /config/appdaemon/apps/climatiq_controller.py
+   /config/appdaemon/apps/climatiq.yaml
+   ```
+
+3. **Konfigurieren:** `climatiq.yaml` mit deinen Entity-IDs anpassen
+4. **Neustarten:** AppDaemon Add-on
+5. **Fertig!** Logs prüfen: `/config/appdaemon/appdaemon.log`
+
+**Vollständige Anleitung:** Siehe [docs/APPDAEMON_SETUP.md](docs/APPDAEMON_SETUP.md)
+
+---
+
+### 📁 Projekt-Struktur
+
+**Wofür jeder Ordner ist:**
+
+```
+climatiq/
+├── appdaemon/apps/          # ← HOME ASSISTANT NUTZER: Diese 2 Dateien kopieren!
+│   ├── climatiq_controller.py   # Der Controller (nach HA kopieren)
+│   └── climatiq.yaml             # Config-Template (nach HA kopieren)
+│
+├── climatiq/                # ← NUR FÜR ENTWICKLER: Python-Package
+│   ├── core/                    # Controller-Klassen (für Tests)
+│   ├── data/                    # InfluxDB-Client
+│   ├── models/                  # ML-Modelle (zukünftig RL)
+│   └── analysis/                # Analyse-Tools
+│
+├── tests/                   # ← NUR FÜR ENTWICKLER: Unit-Tests
+├── scripts/                 # ← OPTIONAL: Analyse-Scripts
+├── docs/                    # ← REFERENZ: Dokumentation
+├── data/                    # ← REFERENZ: Research-Artefakte
+└── models/                  # ← ZUKUNFT: Trainierte ML-Modelle
 ```
 
-Dies stellt eine isolierte Shell mit Python 3.11, allen Dependencies (influxdb, scikit-learn, numpy, pandas, pydantic) und Entwicklungstools (black, ruff, pytest, mypy) bereit.
+**Wichtig:**
+- **Home Assistant Nutzer:** Nur `appdaemon/apps/` nötig (2 Dateien)
+- **Entwickler:** Vollständiges Repo für Tests/Entwicklung
+- **`climatiq/` Ordner:** Python-Package für Entwicklung, NICHT für Home Assistant
 
-**Optional:** [direnv](https://direnv.net/) für automatische Aktivierung:
+---
+
+### 🛠️ Entwicklungs-Setup
+
+**Für Entwickler, die am Code arbeiten wollen:**
+
+#### Repository klonen
+```bash
+git clone https://github.com/kreativmonkey/climatiq.git
+cd climatiq
+```
+
+#### Entwicklungsumgebung einrichten
+
+**Option A: Nix (Empfohlen)**
 ```bash
 echo "use flake" > .envrc
 direnv allow
 ```
 
-#### Manuelle Installation
+**Option B: Manuell**
 ```bash
 python -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 ```
+
+#### Tests ausführen
+```bash
+pytest tests/ -v
+```
+
+**Für umfassende Entwicklungs-Dokumentation, siehe [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)**
 
 ---
 

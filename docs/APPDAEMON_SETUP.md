@@ -1,5 +1,21 @@
 # ClimatIQ AppDaemon Setup
 
+## ⚡ TL;DR (Quick Start)
+
+**Du brauchst nur 2 Dateien für Home Assistant:**
+1. `climatiq_controller.py` - Der Controller-Code
+2. `climatiq.yaml` - Deine Konfiguration
+
+**Wo sie hinkommen:** `/config/appdaemon/apps/` auf deinem Home Assistant
+
+**Was du NICHT brauchst:**
+- ❌ Den `climatiq/` Ordner (Python-Package nur für Entwickler)
+- ❌ Den `tests/` Ordner (Unit-Tests für Entwickler)
+- ❌ Den `scripts/` Ordner (optionale Analyse-Tools)
+- ❌ Git, Python venv, oder irgendwelche Entwicklungs-Tools
+
+---
+
 ## 🏠 Installation in Home Assistant
 
 ### Voraussetzungen
@@ -17,7 +33,11 @@
 
 ### 1. Dateien kopieren
 
-Kopiere die AppDaemon-Dateien in deine Home Assistant Installation:
+**Du brauchst nur 2 Dateien:**
+- `appdaemon/apps/climatiq_controller.py` (der Controller)
+- `appdaemon/apps/climatiq.yaml` (deine Config)
+
+**Kopiere sie nach Home Assistant:**
 
 ```bash
 # Auf deinem Home Assistant Server (via SSH oder File Editor):
@@ -325,6 +345,60 @@ def execute_action(self, action: Dict, state: Dict):
 ```
 
 Test 24h im dry-run, dann echte Execution aktivieren.
+
+---
+
+## ❓ Häufige Fragen (FAQ)
+
+### Was ist der `climatiq/` Ordner?
+
+**Antwort:** Das ist ein Python-Package für Entwickler, die am Code arbeiten wollen. **Für Home Assistant Installation brauchst du ihn NICHT!**
+
+**Ordnerstruktur erklärt:**
+- ✅ `appdaemon/apps/` → **Für Home Assistant** (2 Dateien)
+- ❌ `climatiq/` → Nur für Development (Tests, Code-Struktur)
+- ❌ `tests/` → Nur für Development (Unit-Tests)
+- ❌ `scripts/` → Optional (Analyse-Tools)
+
+### Muss ich Git installieren?
+
+**Antwort:** Nein! Für Home Assistant brauchst du nur die 2 Dateien runterladen (rechte Maustaste → "Speichern unter" auf GitHub).
+
+**Git ist nur nötig wenn:**
+- Du am Code mitentwickeln willst
+- Du Tests laufen lassen willst
+- Du die Analyse-Scripts nutzen willst
+
+### Wie update ich ClimatIQ?
+
+**Antwort:** Lade die neue Version der 2 Dateien von GitHub und ersetze sie:
+1. Download neues `climatiq_controller.py`
+2. Download neues `climatiq.yaml` (oder vergleiche deine Config mit dem Template)
+3. Restart AppDaemon
+
+**Deine Config in `climatiq.yaml` bleibt erhalten** (solange du nur deine Entity-IDs angepasst hast).
+
+### Wo finde ich die Logs?
+
+**Antwort:**
+- **AppDaemon Log:** `/config/appdaemon/appdaemon.log`
+- **RL Training Log:** `/config/appdaemon/logs/climatiq_rl_training.jsonl`
+
+```bash
+# Live Logs:
+tail -f /config/appdaemon/appdaemon.log | grep climatiq
+
+# Fehlersuche:
+grep ERROR /config/appdaemon/appdaemon.log
+```
+
+### Funktioniert das mit Home Assistant Core/Supervised/OS?
+
+**Antwort:** Ja, ClimatIQ funktioniert mit allen Home Assistant Installationen, solange AppDaemon installiert ist.
+
+**AppDaemon Installation:**
+- **Home Assistant OS/Supervised:** Add-on Store → "AppDaemon 4"
+- **Home Assistant Core:** Manuell via `pip install appdaemon`
 
 ---
 
