@@ -495,37 +495,12 @@ class ClimatIQController(hass.Hass):
                 f"Power: {state['power']:.0f}W | Outdoor: {state['outdoor_temp']:.1f}°C | Δ Total: {state['total_delta_abs']:.1f}K"
             )
 
-            # Emergency threshold: high delta overrides stability concerns
-            emergency_threshold = self.rules.get("stability", {}).get(
-                "emergency_delta_threshold", 6.0
-            )
-
-            # Validate threshold is positive number
-            if not isinstance(emergency_threshold, (int, float)) or emergency_threshold <= 0:
-                self.log(
-                    f"Invalid emergency_delta_threshold={emergency_threshold}, using default 6.0K",
-                    level="WARNING",
-                )
-                emergency_threshold = 6.0
-
-            is_emergency = state["total_delta_abs"] > emergency_threshold
-
             # Check: Are we in unstable zone?
             in_unstable = self._is_in_unstable_zone(state["power"])
-
-            if in_unstable and not is_emergency:
-                self.log(
-                    f"⚠️ Unstable zone ({state['power']:.0f}W), delta OK ({state['total_delta_abs']:.1f}K) - waiting",
-                    level="WARNING",
-                )
+            if in_unstable:
+                self.log(f"⚠️ Unstable zone ({state['power']:.0f}W) - no actions", level="WARNING")
                 self.log_episode(state, [], self.calculate_reward(state, in_unstable=True))
                 return
-
-            if is_emergency and in_unstable:
-                self.log(
-                    f"🚨 Emergency override! High delta ({state['total_delta_abs']:.1f}K) in unstable zone ({state['power']:.0f}W) - forcing action",
-                    level="WARNING",
-                )
 
             # Decide & execute actions
             actions = self.decide_actions(state)

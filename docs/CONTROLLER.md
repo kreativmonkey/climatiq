@@ -35,33 +35,6 @@ State → Rules → Actions → Execution → Reward → Log
 - **Power-Zone**: Vermeide Actions bei 1000-1500W (instabil)
 - **Total Delta**: Wenn > 10K, nur größte Abweichung korrigieren
 
-##### Emergency Override
-
-**Problem:** If the system is in an unstable power zone (1000-1500W) with high temperature delta, waiting would make the situation worse.
-
-**Solution:** Emergency delta threshold
-
-- **Normal operation** (delta ≤6K): Avoid actions in unstable zones
-- **Emergency** (delta >6K): Override unstable zone check and take corrective action
-
-**Configuration:**
-```yaml
-stability:
-  emergency_delta_threshold: 6.0  # Kelvin
-```
-
-**Why 6K?**
-- Normal delta: 1-3K (comfortable)
-- High delta: 4-5K (needs attention)
-- Emergency: ≥6K (multiple rooms far from target, MUST correct)
-
-**Example:**
-```
-Power: 973W (unstable zone)
-Delta: 9.0K (emergency!)
-→ Emergency override → Actions executed
-```
-
 #### 3. Hysterese
 - **Cooldown**: Min. 15 Minuten zwischen Actions pro Raum
 

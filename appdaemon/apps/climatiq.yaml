@@ -72,5 +72,4 @@ climatiq_controller:
     
     stability:
       max_actions_per_cycle: 2    # Max gleichzeitige Anpassungen
-      emergency_delta_threshold: 6.0  # High delta overrides unstable zone (Kelvin)
       # KEINE unstable_power_min/max mehr - wird automatisch erkannt!
