@@ -294,7 +294,7 @@ ClimatIQ evaluates actions in this order:
 5. **Stability Targeting**
    - If total power <500W → turn on lowest-priority off room
 
-**Emergency Override:** When `total_delta_abs ≥ emergency_delta_threshold` (default 6.0K), the controller will take action even in unstable power zones. This prevents the system from staying stuck in unstable states.
+**Emergency Override:** When `total_delta_abs > emergency_delta_threshold` (default 6.0K), the controller will take action even in unstable power zones. This prevents the system from staying stuck in unstable states.
 
 ### Example Decision Flow
 

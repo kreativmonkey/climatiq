@@ -41,8 +41,8 @@ State → Rules → Actions → Execution → Reward → Log
 
 **Solution:** Emergency delta threshold
 
-- **Normal operation** (delta <6K): Avoid actions in unstable zones
-- **Emergency** (delta ≥6K): Override unstable zone check and take corrective action
+- **Normal operation** (delta ≤6K): Avoid actions in unstable zones
+- **Emergency** (delta >6K): Override unstable zone check and take corrective action
 
 **Configuration:**
 ```yaml

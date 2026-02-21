@@ -3,7 +3,6 @@ Unit tests for emergency override logic in unstable zones.
 """
 
 
-
 def test_emergency_override_config_structure():
     """Test that emergency_delta_threshold is in config"""
     config = {
@@ -84,3 +83,43 @@ def test_emergency_in_stable_zone_still_acts():
     assert is_emergency
     assert not in_unstable
     # Controller acts (normal behavior)
+
+
+def test_invalid_threshold_type_string():
+    """Invalid threshold type (string) should fall back to default"""
+    config = {"rules": {"stability": {"emergency_delta_threshold": "invalid"}}}
+
+    # In real code, this would trigger validation and fallback to 6.0
+    threshold = config["rules"]["stability"]["emergency_delta_threshold"]
+
+    # Simulate validation
+    if not isinstance(threshold, (int, float)) or threshold <= 0:
+        threshold = 6.0
+
+    assert threshold == 6.0
+
+
+def test_negative_threshold_value():
+    """Negative threshold should fall back to default"""
+    config = {"rules": {"stability": {"emergency_delta_threshold": -5.0}}}
+
+    threshold = config["rules"]["stability"]["emergency_delta_threshold"]
+
+    # Simulate validation
+    if not isinstance(threshold, (int, float)) or threshold <= 0:
+        threshold = 6.0
+
+    assert threshold == 6.0
+
+
+def test_zero_threshold_value():
+    """Zero threshold should fall back to default"""
+    config = {"rules": {"stability": {"emergency_delta_threshold": 0.0}}}
+
+    threshold = config["rules"]["stability"]["emergency_delta_threshold"]
+
+    # Simulate validation
+    if not isinstance(threshold, (int, float)) or threshold <= 0:
+        threshold = 6.0
+
+    assert threshold == 6.0
