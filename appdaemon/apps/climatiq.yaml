@@ -68,8 +68,11 @@ climatiq_controller:
       target_max: 24.0            # Maximum erlaubtes Target
     
     hysteresis:
-      min_action_interval_minutes: 15  # Cooldown pro Raum
+      min_action_interval_minutes: 15         # Cooldown pro Raum (Normal)
+      emergency_action_interval_minutes: 7    # Cooldown in Notfall-Situationen (kürzer)
     
     stability:
-      max_actions_per_cycle: 2    # Max gleichzeitige Anpassungen
+      max_actions_per_cycle: 2                # Max gleichzeitige Anpassungen
+      power_std_threshold: 300                # W - StdDev threshold for oscillation detection
+      power_range_threshold: 800              # W - Range threshold for oscillation detection
       # KEINE unstable_power_min/max mehr - wird automatisch erkannt!

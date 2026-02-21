@@ -495,15 +495,30 @@ class ClimatIQController(hass.Hass):
                 f"Power: {state['power']:.0f}W | Outdoor: {state['outdoor_temp']:.1f}°C | Δ Total: {state['total_delta_abs']:.1f}K"
             )
 
+            # Check for emergency conditions
+            comfort_emergency = self._check_comfort_emergency(state)
+            stability_emergency = self._check_stability_emergency(state)
+
+            is_emergency = comfort_emergency or stability_emergency
+
+            if comfort_emergency:
+                self.log("🚨 Comfort Emergency! Room(s) outside tolerance zone", level="WARNING")
+
+            if stability_emergency:
+                self.log("🚨 Stability Emergency! Power oscillating", level="WARNING")
+
             # Check: Are we in unstable zone?
             in_unstable = self._is_in_unstable_zone(state["power"])
-            if in_unstable:
-                self.log(f"⚠️ Unstable zone ({state['power']:.0f}W) - no actions", level="WARNING")
+            if in_unstable and not is_emergency:
+                self.log(
+                    f"⚠️ Unstable zone ({state['power']:.0f}W), no emergency - waiting",
+                    level="WARNING",
+                )
                 self.log_episode(state, [], self.calculate_reward(state, in_unstable=True))
                 return
 
             # Decide & execute actions
-            actions = self.decide_actions(state)
+            actions = self.decide_actions(state, is_emergency=is_emergency)
 
             if not actions:
                 self.log("No actions needed")
@@ -524,6 +539,126 @@ class ClimatIQController(hass.Hass):
         for zone in self.unstable_zones:
             if zone["min"] <= power <= zone["max"]:
                 return True
+        return False
+
+    def _check_comfort_emergency(self, state: Dict) -> bool:
+        """Check if any room is outside comfort tolerance zone
+
+        Returns True if any room has:
+        - delta < -temp_tolerance_cold (too cold)
+        - delta > +temp_tolerance_warm (too warm)
+        """
+        rules = self.rules
+        cold_tolerance = rules["comfort"]["temp_tolerance_cold"]  # e.g., 1.5
+        warm_tolerance = rules["comfort"]["temp_tolerance_warm"]  # e.g., 1.0
+
+        for name, room in state["rooms"].items():
+            delta = room["delta"]  # positive = too warm, negative = too cold
+
+            # Too cold: delta < -cold_tolerance
+            if delta < -cold_tolerance:
+                self.log(
+                    f"  ❄️ {name}: Too cold! Delta {delta:.1f}K (threshold: -{cold_tolerance}K)",
+                    level="WARNING",
+                )
+                return True
+
+            # Too warm: delta > +warm_tolerance
+            if delta > warm_tolerance:
+                self.log(
+                    f"  🔥 {name}: Too warm! Delta {delta:.1f}K (threshold: +{warm_tolerance}K)",
+                    level="WARNING",
+                )
+                return True
+
+        return False
+
+    def _check_stability_emergency(self, state: Dict) -> bool:
+        """Check if power is oscillating (high fluctuation in last 15 minutes)
+
+        Returns True if power has high standard deviation or range in recent history.
+        """
+        # Query last 15 minutes of power data from InfluxDB
+        try:
+            from datetime import timedelta
+
+            end_time = datetime.now()
+            start_time = end_time - timedelta(minutes=15)
+
+            # Get first unit's power sensor for emergency checks
+            if not self.outdoor_units:
+                return False
+
+            first_unit = list(self.outdoor_units.values())[0]
+            power_entity = first_unit.get("power_sensor")
+
+            if not power_entity:
+                return False
+
+            # Import InfluxDB client
+            from influxdb import InfluxDBClient
+
+            cfg = self.influx_config
+            if not cfg.get("host"):
+                # No InfluxDB, can't check stability emergency
+                return False
+
+            client = InfluxDBClient(
+                host=cfg.get("host", "localhost"),
+                port=cfg.get("port", 8086),
+                username=cfg.get("username"),
+                password=cfg.get("password"),
+                database=cfg.get("database", "homeassistant"),
+            )
+
+            # Extract entity_id from power sensor (remove 'sensor.' prefix if present)
+            entity_id = power_entity.replace("sensor.", "")
+
+            query = f"""
+            SELECT mean("value") as power
+            FROM "{cfg.get('measurement', 'W')}"
+            WHERE "entity_id" = '{entity_id}'
+            AND time >= '{start_time.isoformat()}Z'
+            AND time <= '{end_time.isoformat()}Z'
+            GROUP BY time(1m)
+            """
+
+            result = client.query(query)
+            points = list(result.get_points())
+
+            if len(points) < 5:
+                # Not enough data yet
+                return False
+
+            # Extract power values
+            power_values = [p["power"] for p in points if p["power"] is not None]
+
+            if len(power_values) < 5:
+                return False
+
+            # Calculate fluctuation metrics
+            import statistics
+
+            power_mean = statistics.mean(power_values)
+            power_std = statistics.stdev(power_values)
+            power_range = max(power_values) - min(power_values)
+
+            # Thresholds from config
+            std_threshold = self.rules.get("stability", {}).get("power_std_threshold", 300)
+            range_threshold = self.rules.get("stability", {}).get("power_range_threshold", 800)
+
+            if power_std > std_threshold or power_range > range_threshold:
+                self.log(
+                    f"  ⚡ Power oscillating: StdDev={power_std:.0f}W, Range={power_range:.0f}W "
+                    f"(mean={power_mean:.0f}W, last 15min)",
+                    level="WARNING",
+                )
+                return True
+
+        except Exception as e:
+            self.log(f"Error checking power stability: {e}", level="ERROR")
+            return False
+
         return False
 
     def get_current_state(self) -> Optional[Dict]:
@@ -572,7 +707,7 @@ class ClimatIQController(hass.Hass):
             self.log(f"State error: {e}", level="ERROR")
             return None
 
-    def decide_actions(self, state: Dict) -> List[Dict]:
+    def decide_actions(self, state: Dict, is_emergency: bool = False) -> List[Dict]:
         """
         Decide which actions are needed.
 
@@ -590,10 +725,24 @@ class ClimatIQController(hass.Hass):
         is_night_mode = 23 <= current_hour or current_hour < 6
 
         for name, room in state["rooms"].items():
-            # Cooldown check
+            # Cooldown check (shorter cooldown in emergency)
             last = self.last_action_time.get(name, datetime.min)
-            cooldown = timedelta(minutes=rules["hysteresis"]["min_action_interval_minutes"])
-            if (datetime.now() - last) < cooldown:
+
+            if is_emergency:
+                cooldown_minutes = rules["hysteresis"].get("emergency_action_interval_minutes", 7)
+            else:
+                cooldown_minutes = rules["hysteresis"]["min_action_interval_minutes"]
+
+            cooldown = timedelta(minutes=cooldown_minutes)
+            time_since_last = datetime.now() - last
+
+            if time_since_last < cooldown:
+                remaining_minutes = (cooldown - time_since_last).total_seconds() / 60
+                self.log(
+                    f"⏳ {name}: Cooldown active ({remaining_minutes:.1f} min remaining, "
+                    f"{'emergency' if is_emergency else 'normal'} mode)",
+                    level="DEBUG",
+                )
                 continue
 
             delta = room["delta"]

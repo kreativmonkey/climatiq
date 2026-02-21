@@ -36,7 +36,71 @@ State → Rules → Actions → Execution → Reward → Log
 - **Total Delta**: Wenn > 10K, nur größte Abweichung korrigieren
 
 #### 3. Hysterese
-- **Cooldown**: Min. 15 Minuten zwischen Actions pro Raum
+- **Cooldown**: Min. 15 Minuten zwischen Actions pro Raum (Normal)
+- **Emergency Cooldown**: 7 Minuten (bei Notfall-Situationen)
+
+## Emergency Override
+
+The controller has TWO types of emergency conditions that bypass normal constraints:
+
+### 1. Comfort Emergency
+
+**Trigger:** Individual room outside comfort tolerance zone
+
+**Configuration:**
+```yaml
+rules:
+  comfort:
+    temp_tolerance_cold: 1.5  # Room delta < -1.5K → too cold
+    temp_tolerance_warm: 1.0  # Room delta > +1.0K → too warm
+```
+
+**Behavior:**
+- Each room checked individually
+- If ANY room exceeds tolerance → comfort emergency
+- Uses shorter cooldown (7 min vs 15 min)
+- Logs which room(s) triggered emergency
+
+**Example:**
+```
+🚨 Comfort Emergency! Room(s) outside tolerance zone
+  ❄️ bedroom: Too cold! Delta -1.8K (threshold: -1.5K)
+```
+
+### 2. Stability Emergency
+
+**Trigger:** Power oscillating/fluctuating heavily in last 15 minutes
+
+**Configuration:**
+```yaml
+rules:
+  stability:
+    power_std_threshold: 300      # W - Standard deviation threshold
+    power_range_threshold: 800    # W - Range (max-min) threshold
+```
+
+**Behavior:**
+- Queries last 15 minutes of power data from InfluxDB
+- Calculates standard deviation and range
+- If EITHER threshold exceeded → stability emergency
+- NOT about being in unstable zone (1000-1500W)
+- About fluctuation: Is system settling or oscillating?
+
+**Philosophy:** *"If the controller manages to keep the system stable in an 'unstable zone', that's fine. What matters is fluctuation, not the zone itself."*
+
+**Example:**
+```
+🚨 Stability Emergency! Power oscillating
+  ⚡ Power oscillating: StdDev=370W, Range=900W (mean=1100W, last 15min)
+```
+
+### Emergency Cooldown
+
+In emergency situations, the controller uses a shorter cooldown:
+- Normal operations: 15 minutes
+- Emergency: 7 minutes
+
+This allows faster correction while still preventing overshooting.
 
 ### State
 
