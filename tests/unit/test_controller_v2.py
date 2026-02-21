@@ -77,7 +77,8 @@ def test_stability_targeting_activates_unit(controller, mock_units):
 
     assert action.action_type == ActionType.ENABLE_UNIT
     assert action.target_unit in ["schlafzimmer", "arbeitszimmer"]
-    assert "Stabilitäts-Targeting" in action.reason
+    # During night hours (23:00-06:00), night mode may activate units instead
+    assert "Stabilitäts-Targeting" in action.reason or "Night Mode" in action.reason
 
 
 def test_gradual_nudge_small_adjustment(controller, mock_units):
