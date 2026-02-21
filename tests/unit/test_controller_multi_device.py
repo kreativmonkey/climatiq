@@ -4,10 +4,9 @@ Tests backward compatibility and new multi-device features.
 """
 
 import sys
-import os
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, patch, Mock
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -20,6 +19,7 @@ sys.modules["appdaemon"] = MagicMock()
 sys.modules["appdaemon.plugins"] = MagicMock()
 sys.modules["appdaemon.plugins.hass"] = MagicMock()
 sys.modules["appdaemon.plugins.hass.hassapi"] = MagicMock()
+
 
 # Create a mock Hass base class
 class MockHass:
@@ -58,7 +58,7 @@ class MockHass:
 sys.modules["appdaemon.plugins.hass.hassapi"].Hass = MockHass
 
 # Now import the controller
-import climatiq_controller
+import climatiq_controller  # noqa: E402
 
 
 @pytest.fixture
@@ -136,19 +136,19 @@ def create_controller(config):
     controller.last_action_time = {}
     controller.unstable_zones = []
     controller.stable_zones = []
-    
+
     # Parse outdoor units
     controller.outdoor_units = controller.parse_outdoor_units()
-    
+
     return controller
 
 
 def test_backward_compatible_single_unit(single_unit_config):
     """Test that single-unit config (old format) still works"""
     controller = create_controller(single_unit_config)
-    
+
     outdoor_units = controller.outdoor_units
-    
+
     assert "default" in outdoor_units
     assert outdoor_units["default"]["operating_mode"] == "heat"
     assert outdoor_units["default"]["power_sensor"] == "sensor.ac_current_energy"
@@ -157,9 +157,9 @@ def test_backward_compatible_single_unit(single_unit_config):
 def test_multi_unit_config_parsing(multi_unit_config):
     """Test parsing of multi-unit config"""
     controller = create_controller(multi_unit_config)
-    
+
     outdoor_units = controller.outdoor_units
-    
+
     assert len(outdoor_units) == 2
     assert "unit_1" in outdoor_units
     assert "unit_2" in outdoor_units
@@ -170,12 +170,12 @@ def test_multi_unit_config_parsing(multi_unit_config):
 def test_get_outdoor_unit_for_room(multi_unit_config):
     """Test room-to-unit assignment"""
     controller = create_controller(multi_unit_config)
-    
+
     # Test explicit assignment
     unit_id, unit_cfg = controller.get_outdoor_unit_for_room("erdgeschoss")
     assert unit_id == "unit_1"
     assert unit_cfg["operating_mode"] == "heat"
-    
+
     unit_id, unit_cfg = controller.get_outdoor_unit_for_room("kinderzimmer")
     assert unit_id == "unit_2"
     assert unit_cfg["operating_mode"] == "cool"
@@ -184,10 +184,10 @@ def test_get_outdoor_unit_for_room(multi_unit_config):
 def test_power_aggregation_single_unit(single_unit_config):
     """Test power aggregation with single unit"""
     controller = create_controller(single_unit_config)
-    
+
     # Mock get_state
     controller.get_state = lambda entity_id: "1500" if "power" in entity_id else None
-    
+
     power = controller.get_total_power()
     assert power == 1500.0
 
@@ -195,7 +195,7 @@ def test_power_aggregation_single_unit(single_unit_config):
 def test_power_aggregation_multi_unit(multi_unit_config):
     """Test power aggregation across multiple units"""
     controller = create_controller(multi_unit_config)
-    
+
     # Mock state - different power per unit
     def mock_get_state(entity_id):
         if entity_id == "sensor.ac_unit1_power":
@@ -203,9 +203,9 @@ def test_power_aggregation_multi_unit(multi_unit_config):
         elif entity_id == "sensor.ac_unit2_power":
             return "600"
         return None
-    
+
     controller.get_state = mock_get_state
-    
+
     power = controller.get_total_power()
     assert power == 1400.0  # 800 + 600
 
@@ -213,26 +213,26 @@ def test_power_aggregation_multi_unit(multi_unit_config):
 def test_turn_room_on_with_correct_mode(multi_unit_config):
     """Test that turning on a room uses the correct operating mode"""
     controller = create_controller(multi_unit_config)
-    
+
     services_called = []
-    controller.call_service = lambda service, **kwargs: services_called.append({
-        "service": service, "kwargs": kwargs
-    })
-    
+    controller.call_service = lambda service, **kwargs: services_called.append(
+        {"service": service, "kwargs": kwargs}
+    )
+
     # Turn on room on unit_1 (heat mode)
     controller.turn_room_on("erdgeschoss")
-    
+
     # Check service call
     assert len(services_called) == 1
     call = services_called[0]
     assert call["service"] == "climate/set_hvac_mode"
     assert call["kwargs"]["entity_id"] == "climate.eg"
     assert call["kwargs"]["hvac_mode"] == "heat"
-    
+
     # Clear and test unit_2 (cool mode)
     services_called.clear()
     controller.turn_room_on("kinderzimmer")
-    
+
     assert len(services_called) == 1
     call = services_called[0]
     assert call["kwargs"]["hvac_mode"] == "cool"
@@ -241,14 +241,14 @@ def test_turn_room_on_with_correct_mode(multi_unit_config):
 def test_turn_room_off(multi_unit_config):
     """Test turning off a room"""
     controller = create_controller(multi_unit_config)
-    
+
     services_called = []
-    controller.call_service = lambda service, **kwargs: services_called.append({
-        "service": service, "kwargs": kwargs
-    })
-    
+    controller.call_service = lambda service, **kwargs: services_called.append(
+        {"service": service, "kwargs": kwargs}
+    )
+
     controller.turn_room_off("erdgeschoss")
-    
+
     assert len(services_called) == 1
     call = services_called[0]
     assert call["service"] == "climate/turn_off"
@@ -258,11 +258,11 @@ def test_turn_room_off(multi_unit_config):
 def test_night_mode_turns_off_rooms(multi_unit_config):
     """Test that night mode triggers turn_off actions"""
     controller = create_controller(multi_unit_config)
-    
+
     # Mock current time to be in night mode (23:00)
     with patch("climatiq_controller.datetime") as mock_datetime:
         mock_datetime.now.return_value.hour = 23
-        
+
         state = {
             "power": 1000,
             "outdoor_temp": 5.0,
@@ -276,9 +276,9 @@ def test_night_mode_turns_off_rooms(multi_unit_config):
             },
             "total_delta_abs": 0.5,
         }
-        
+
         actions = controller.decide_actions(state)
-        
+
         # Should decide to turn off room
         assert len(actions) > 0
         assert actions[0]["action_type"] == "turn_off"
@@ -288,7 +288,7 @@ def test_night_mode_turns_off_rooms(multi_unit_config):
 def test_overheating_prevention(multi_unit_config):
     """Test that overheating triggers turn_off"""
     controller = create_controller(multi_unit_config)
-    
+
     state = {
         "power": 1500,
         "outdoor_temp": 5.0,
@@ -302,9 +302,9 @@ def test_overheating_prevention(multi_unit_config):
         },
         "total_delta_abs": 2.5,
     }
-    
+
     actions = controller.decide_actions(state)
-    
+
     # Should turn off due to overheating
     assert len(actions) > 0
     assert actions[0]["action_type"] == "turn_off"
@@ -314,7 +314,7 @@ def test_overheating_prevention(multi_unit_config):
 def test_too_cold_turns_on_room(multi_unit_config):
     """Test that too cold triggers turn_on when room is off"""
     controller = create_controller(multi_unit_config)
-    
+
     state = {
         "power": 800,
         "outdoor_temp": 5.0,
@@ -328,9 +328,9 @@ def test_too_cold_turns_on_room(multi_unit_config):
         },
         "total_delta_abs": 3.0,
     }
-    
+
     actions = controller.decide_actions(state)
-    
+
     # Should turn on room
     assert len(actions) > 0
     assert actions[0]["action_type"] == "turn_on"
@@ -341,7 +341,7 @@ def test_too_cold_turns_on_room(multi_unit_config):
 def test_stability_targeting_turns_on_room(multi_unit_config):
     """Test that low power triggers turn_on for stability"""
     controller = create_controller(multi_unit_config)
-    
+
     state = {
         "power": 450,  # Below 500W threshold
         "outdoor_temp": 5.0,
@@ -355,9 +355,9 @@ def test_stability_targeting_turns_on_room(multi_unit_config):
         },
         "total_delta_abs": 1.0,
     }
-    
+
     actions = controller.decide_actions(state)
-    
+
     # Should turn on for stability
     assert len(actions) > 0
     assert actions[0]["action_type"] == "turn_on"
@@ -367,12 +367,10 @@ def test_stability_targeting_turns_on_room(multi_unit_config):
 def test_cooldown_prevents_rapid_changes(multi_unit_config):
     """Test that cooldown prevents actions too soon"""
     controller = create_controller(multi_unit_config)
-    
+
     # Set last action time to 5 minutes ago (within 15min cooldown)
-    controller.last_action_time = {
-        "erdgeschoss": datetime.now() - timedelta(minutes=5)
-    }
-    
+    controller.last_action_time = {"erdgeschoss": datetime.now() - timedelta(minutes=5)}
+
     state = {
         "power": 800,
         "outdoor_temp": 5.0,
@@ -386,9 +384,9 @@ def test_cooldown_prevents_rapid_changes(multi_unit_config):
         },
         "total_delta_abs": 3.0,
     }
-    
+
     actions = controller.decide_actions(state)
-    
+
     # Should not create action due to cooldown
     assert len(actions) == 0
 
@@ -396,7 +394,7 @@ def test_cooldown_prevents_rapid_changes(multi_unit_config):
 def test_validate_outdoor_unit_modes(multi_unit_config):
     """Test outdoor unit mode validation"""
     controller = create_controller(multi_unit_config)
-    
+
     # Should be valid (different modes across different units is OK)
     is_valid = controller.validate_outdoor_unit_modes()
     assert is_valid is True
