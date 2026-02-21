@@ -58,3 +58,8 @@ Thumbs.db
 # Logs
 logs/
 *.log
+
+# Coverage
+.coverage
+coverage.xml
+htmlcov/

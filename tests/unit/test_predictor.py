@@ -134,3 +134,75 @@ class TestPredictor:
         assert data["is_trained"] is True
         assert "metrics" in data
         assert "feature_importance" in data
+
+    def test_predict_with_insufficient_recent_data(self, predictor, training_data):
+        """Test predict with very small recent data window."""
+        predictor.train(training_data)
+        # Only 5 datapoints instead of recommended 30
+        recent = training_data.tail(5)
+        result = predictor.predict(recent)
+        
+        # Should still return a result
+        assert "cycling_predicted" in result
+        assert "status" in result
+
+    def test_retrain_with_new_data(self, predictor, training_data):
+        """Test retraining with updated data."""
+        # Train with initial data
+        predictor.train(training_data.head(1000))
+        first_accuracy = predictor.metrics.get("accuracy", 0)
+        
+        # Retrain with more data
+        predictor.train(training_data)
+        second_accuracy = predictor.metrics.get("accuracy", 0)
+        
+        # Both should have valid accuracy
+        assert 0 <= first_accuracy <= 1
+        assert 0 <= second_accuracy <= 1
+
+    def test_feature_importance_available_after_training(self, predictor, training_data):
+        """Test that feature importance is available after training."""
+        predictor.train(training_data)
+        
+        assert hasattr(predictor, "feature_importance_")
+        assert len(predictor.feature_importance_) > 0
+        
+        # All importance values should be between 0 and 1
+        assert all(0 <= v <= 1 for v in predictor.feature_importance_.values())
+
+    def test_predict_with_missing_features(self, predictor, training_data):
+        """Test predict handles missing features gracefully."""
+        predictor.train(training_data)
+        
+        # Create data with missing columns
+        incomplete_data = training_data.tail(30).drop(columns=["hour"], errors="ignore")
+        
+        # Should either handle it or raise informative error
+        try:
+            result = predictor.predict(incomplete_data)
+            assert "status" in result
+        except (KeyError, ValueError):
+            # Acceptable to raise error for missing features
+            pass
+
+    def test_model_save_and_load_preserves_accuracy(self, training_data):
+        """Test that saved model maintains same accuracy."""
+        with tempfile.TemporaryDirectory() as tmpdir:
+            model_path = Path(tmpdir) / "model.joblib"
+            
+            # Train and save
+            predictor1 = CyclingPredictor(model_path=model_path)
+            predictor1.train(training_data)
+            original_metrics = predictor1.metrics.copy()
+            predictor1.save_model()
+            
+            # Load and compare
+            predictor2 = CyclingPredictor(model_path=model_path)
+            recent = training_data.tail(100)
+            
+            result1 = predictor1.predict(recent)
+            result2 = predictor2.predict(recent)
+            
+            # Same model should give same predictions
+            assert result1["cycling_predicted"] == result2["cycling_predicted"]
+            assert abs(result1["probability"] - result2["probability"]) < 0.01
