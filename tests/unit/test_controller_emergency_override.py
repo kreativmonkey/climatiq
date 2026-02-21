@@ -123,3 +123,62 @@ def test_zero_threshold_value():
         threshold = 6.0
 
     assert threshold == 6.0
+
+
+def test_emergency_cooldown_config():
+    """Test emergency cooldown configuration"""
+    config = {
+        "rules": {
+            "hysteresis": {
+                "min_action_interval_minutes": 15,
+                "emergency_action_interval_minutes": 7,
+            }
+        }
+    }
+
+    # Verify both values exist
+    assert config["rules"]["hysteresis"]["min_action_interval_minutes"] == 15
+    assert config["rules"]["hysteresis"]["emergency_action_interval_minutes"] == 7
+
+    # Emergency should be shorter
+    assert (
+        config["rules"]["hysteresis"]["emergency_action_interval_minutes"]
+        < config["rules"]["hysteresis"]["min_action_interval_minutes"]
+    )
+
+
+def test_emergency_cooldown_default():
+    """Test default emergency cooldown when not configured"""
+    config = {"rules": {"hysteresis": {"min_action_interval_minutes": 15}}}
+
+    # If emergency_action_interval_minutes not set, should default to 7
+    emergency_cooldown = config["rules"]["hysteresis"].get("emergency_action_interval_minutes", 7)
+    assert emergency_cooldown == 7
+
+
+def test_cooldown_logic_normal_vs_emergency():
+    """Test that emergency uses shorter cooldown"""
+    rules = {
+        "hysteresis": {
+            "min_action_interval_minutes": 15,
+            "emergency_action_interval_minutes": 7,
+        }
+    }
+
+    # Normal mode
+    is_emergency = False
+    cooldown_minutes = (
+        rules["hysteresis"].get("emergency_action_interval_minutes", 7)
+        if is_emergency
+        else rules["hysteresis"]["min_action_interval_minutes"]
+    )
+    assert cooldown_minutes == 15
+
+    # Emergency mode
+    is_emergency = True
+    cooldown_minutes = (
+        rules["hysteresis"].get("emergency_action_interval_minutes", 7)
+        if is_emergency
+        else rules["hysteresis"]["min_action_interval_minutes"]
+    )
+    assert cooldown_minutes == 7

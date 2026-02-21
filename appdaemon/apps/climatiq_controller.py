@@ -528,7 +528,7 @@ class ClimatIQController(hass.Hass):
                 )
 
             # Decide & execute actions
-            actions = self.decide_actions(state)
+            actions = self.decide_actions(state, is_emergency=is_emergency)
 
             if not actions:
                 self.log("No actions needed")
@@ -597,7 +597,7 @@ class ClimatIQController(hass.Hass):
             self.log(f"State error: {e}", level="ERROR")
             return None
 
-    def decide_actions(self, state: Dict) -> List[Dict]:
+    def decide_actions(self, state: Dict, is_emergency: bool = False) -> List[Dict]:
         """
         Decide which actions are needed.
 
@@ -615,10 +615,24 @@ class ClimatIQController(hass.Hass):
         is_night_mode = 23 <= current_hour or current_hour < 6
 
         for name, room in state["rooms"].items():
-            # Cooldown check
+            # Cooldown check (shorter cooldown in emergency)
             last = self.last_action_time.get(name, datetime.min)
-            cooldown = timedelta(minutes=rules["hysteresis"]["min_action_interval_minutes"])
-            if (datetime.now() - last) < cooldown:
+
+            if is_emergency:
+                cooldown_minutes = rules["hysteresis"].get("emergency_action_interval_minutes", 7)
+            else:
+                cooldown_minutes = rules["hysteresis"]["min_action_interval_minutes"]
+
+            cooldown = timedelta(minutes=cooldown_minutes)
+            time_since_last = datetime.now() - last
+
+            if time_since_last < cooldown:
+                remaining_minutes = (cooldown - time_since_last).total_seconds() / 60
+                self.log(
+                    f"⏳ {name}: Cooldown active ({remaining_minutes:.1f} min remaining, "
+                    f"{'emergency' if is_emergency else 'normal'} mode)",
+                    level="DEBUG",
+                )
                 continue
 
             delta = room["delta"]
