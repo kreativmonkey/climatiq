@@ -68,8 +68,7 @@ climatiq_controller:
       target_max: 24.0            # Maximum erlaubtes Target
     
     hysteresis:
-      min_action_interval_minutes: 15  # Cooldown pro Raum (Normal)
-      emergency_action_interval_minutes: 7  # Cooldown in Notfall-Situationen (kürzer)
+      min_action_interval_minutes: 15  # Cooldown pro Raum
     
     stability:
       max_actions_per_cycle: 2    # Max gleichzeitige Anpassungen
