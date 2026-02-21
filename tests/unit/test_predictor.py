@@ -149,26 +149,31 @@ class TestPredictor:
     def test_retrain_with_new_data(self, predictor, training_data):
         """Test retraining with updated data."""
         # Train with initial data
-        predictor.train(training_data.head(1000))
-        first_accuracy = predictor.metrics.get("accuracy", 0)
+        result1 = predictor.train(training_data.head(1000))
+        assert result1["success"] is True
+        first_f1 = result1["metrics"]["f1_mean"]
         
         # Retrain with more data
-        predictor.train(training_data)
-        second_accuracy = predictor.metrics.get("accuracy", 0)
+        result2 = predictor.train(training_data)
+        assert result2["success"] is True
+        second_f1 = result2["metrics"]["f1_mean"]
         
-        # Both should have valid accuracy
-        assert 0 <= first_accuracy <= 1
-        assert 0 <= second_accuracy <= 1
+        # Both should have valid F1 scores
+        assert 0 <= first_f1 <= 1
+        assert 0 <= second_f1 <= 1
 
     def test_feature_importance_available_after_training(self, predictor, training_data):
         """Test that feature importance is available after training."""
-        predictor.train(training_data)
+        result = predictor.train(training_data)
+        assert result["success"] is True
         
-        assert hasattr(predictor, "feature_importance_")
-        assert len(predictor.feature_importance_) > 0
+        # Feature importance should be accessible via dashboard data
+        dashboard = predictor.get_dashboard_data()
+        assert "feature_importance" in dashboard
+        assert len(dashboard["feature_importance"]) > 0
         
         # All importance values should be between 0 and 1
-        assert all(0 <= v <= 1 for v in predictor.feature_importance_.values())
+        assert all(0 <= v <= 1 for v in dashboard["feature_importance"].values())
 
     def test_predict_with_missing_features(self, predictor, training_data):
         """Test predict handles missing features gracefully."""
@@ -192,8 +197,8 @@ class TestPredictor:
             
             # Train and save
             predictor1 = CyclingPredictor(model_path=model_path)
-            predictor1.train(training_data)
-            original_metrics = predictor1.metrics.copy()
+            train_result = predictor1.train(training_data)
+            assert train_result["success"] is True
             predictor1.save_model()
             
             # Load and compare
