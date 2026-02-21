@@ -64,6 +64,9 @@ class ClimatIQController(hass.Hass):
         if not self.validate_outdoor_unit_modes():
             self.log("WARNING: Mixed heat/cool modes detected within units!", level="WARNING")
 
+        # Create Home Assistant device with sensors
+        self._create_device_sensors()
+
         # Start control cycle
         interval = self.args.get("interval_minutes", 5)
         self.run_every(self.control_cycle, datetime.now() + timedelta(seconds=30), interval * 60)
@@ -477,6 +480,269 @@ class ClimatIQController(hass.Hass):
             self.log(f"Error saving cache: {e}", level="WARNING")
 
     # =========================================================================
+    # HOME ASSISTANT DEVICE & SENSORS
+    # =========================================================================
+
+    def _create_device_sensors(self):
+        """Create Home Assistant device with sensor entities for ClimatIQ metrics"""
+
+        device_info = {
+            "identifiers": [("climatiq", "controller")],
+            "name": "ClimatIQ Controller",
+            "model": "Rule-Based Heat Pump Controller",
+            "manufacturer": "ClimatIQ",
+            "sw_version": "3.1.0",
+        }
+
+        # System metrics
+        self.set_state(
+            "sensor.climatiq_power",
+            state=0,
+            attributes={
+                "friendly_name": "ClimatIQ Power",
+                "unit_of_measurement": "W",
+                "device_class": "power",
+                "state_class": "measurement",
+                "icon": "mdi:flash",
+                "device": device_info,
+            },
+        )
+
+        self.set_state(
+            "sensor.climatiq_outdoor_temp",
+            state=0,
+            attributes={
+                "friendly_name": "ClimatIQ Outdoor Temperature",
+                "unit_of_measurement": "°C",
+                "device_class": "temperature",
+                "state_class": "measurement",
+                "icon": "mdi:thermometer",
+                "device": device_info,
+            },
+        )
+
+        self.set_state(
+            "sensor.climatiq_total_delta",
+            state=0,
+            attributes={
+                "friendly_name": "ClimatIQ Total Delta",
+                "unit_of_measurement": "K",
+                "state_class": "measurement",
+                "icon": "mdi:delta",
+                "device": device_info,
+            },
+        )
+
+        self.set_state(
+            "sensor.climatiq_stability_state",
+            state="unknown",
+            attributes={
+                "friendly_name": "ClimatIQ Stability State",
+                "icon": "mdi:state-machine",
+                "device": device_info,
+            },
+        )
+
+        # Performance metrics
+        self.set_state(
+            "sensor.climatiq_cycles_today",
+            state=0,
+            attributes={
+                "friendly_name": "ClimatIQ Cycles Today",
+                "icon": "mdi:counter",
+                "state_class": "total_increasing",
+                "device": device_info,
+            },
+        )
+
+        self.set_state(
+            "sensor.climatiq_actions_today",
+            state=0,
+            attributes={
+                "friendly_name": "ClimatIQ Actions Today",
+                "icon": "mdi:cog",
+                "state_class": "total_increasing",
+                "device": device_info,
+            },
+        )
+
+        self.set_state(
+            "sensor.climatiq_last_reward",
+            state=0,
+            attributes={
+                "friendly_name": "ClimatIQ Last Reward",
+                "icon": "mdi:star",
+                "state_class": "measurement",
+                "device": device_info,
+            },
+        )
+
+        self.set_state(
+            "sensor.climatiq_compressor_runtime",
+            state=0,
+            attributes={
+                "friendly_name": "ClimatIQ Compressor Runtime",
+                "unit_of_measurement": "%",
+                "icon": "mdi:gauge",
+                "state_class": "measurement",
+                "device": device_info,
+            },
+        )
+
+        # Status metrics
+        self.set_state(
+            "sensor.climatiq_emergency_active",
+            state="off",
+            attributes={
+                "friendly_name": "ClimatIQ Emergency Active",
+                "icon": "mdi:alert",
+                "device_class": "binary_sensor",
+                "device": device_info,
+            },
+        )
+
+        self.set_state(
+            "sensor.climatiq_cooldown_active",
+            state="off",
+            attributes={
+                "friendly_name": "ClimatIQ Cooldown Active",
+                "icon": "mdi:timer-sand",
+                "device_class": "binary_sensor",
+                "device": device_info,
+            },
+        )
+
+        self.set_state(
+            "sensor.climatiq_active_rooms",
+            state=0,
+            attributes={
+                "friendly_name": "ClimatIQ Active Rooms",
+                "icon": "mdi:home-group",
+                "state_class": "measurement",
+                "device": device_info,
+            },
+        )
+
+        self.set_state(
+            "sensor.climatiq_critical_room",
+            state="none",
+            attributes={
+                "friendly_name": "ClimatIQ Critical Room",
+                "icon": "mdi:alert-circle",
+                "device": device_info,
+            },
+        )
+
+        self.log("✅ Created ClimatIQ device with 12 sensor entities")
+
+    def _update_device_sensors(
+        self, state: Dict, is_emergency: bool, actions: List[Dict], reward: Dict
+    ):
+        """Update Home Assistant sensor entities with current metrics"""
+
+        # System metrics
+        self.set_state("sensor.climatiq_power", state=state["power"])
+        self.set_state("sensor.climatiq_outdoor_temp", state=state["outdoor_temp"])
+        self.set_state("sensor.climatiq_total_delta", state=state["total_delta_abs"])
+
+        # Determine stability state
+        power = state["power"]
+        if 1000 <= power <= 1500:
+            stability = "unstable"
+        elif power < 700 or 1700 < power < 2100:
+            stability = "stable"
+        else:
+            stability = "transition"
+        self.set_state("sensor.climatiq_stability_state", state=stability)
+
+        # Performance metrics (track internally)
+        # Initialize counters if needed
+        if not hasattr(self, "_daily_actions"):
+            self._daily_actions = 0
+            self._daily_reset_date = datetime.now().date()
+
+        if not hasattr(self, "_last_power_state"):
+            self._last_power_state = None
+            self._daily_cycles = 0
+
+        # Reset counters at midnight
+        if datetime.now().date() != self._daily_reset_date:
+            self._daily_actions = 0
+            self._daily_cycles = 0
+            self._daily_reset_date = datetime.now().date()
+
+        # Increment actions
+        if len(actions) > 0:
+            self._daily_actions += len(actions)
+
+        # Detect cycle (power transition from low to high)
+        current_power = state["power"]
+        if self._last_power_state is not None:
+            if self._last_power_state < 700 and current_power > 700:
+                self._daily_cycles += 1
+
+        self._last_power_state = current_power
+
+        self.set_state("sensor.climatiq_actions_today", state=self._daily_actions)
+        self.set_state("sensor.climatiq_cycles_today", state=self._daily_cycles)
+        self.set_state("sensor.climatiq_last_reward", state=round(reward["total"], 2))
+
+        # Calculate runtime % (simple: >700W = running)
+        # Track runtime minutes
+        if not hasattr(self, "_runtime_minutes_today"):
+            self._runtime_minutes_today = 0
+            self._runtime_date = datetime.now().date()
+
+        if datetime.now().date() != self._runtime_date:
+            self._runtime_minutes_today = 0
+            self._runtime_date = datetime.now().date()
+
+        # Increment runtime if compressor is running
+        interval = self.args.get("interval_minutes", 5)
+        if current_power > 700:
+            self._runtime_minutes_today += interval
+
+        # Calculate percentage of day (1440 minutes = 24h)
+        runtime_percent = min(100, (self._runtime_minutes_today / 1440) * 100)
+        self.set_state("sensor.climatiq_compressor_runtime", state=int(runtime_percent))
+
+        # Status metrics
+        self.set_state("sensor.climatiq_emergency_active", state="on" if is_emergency else "off")
+
+        # Check if any room is in cooldown
+        cooldown_active = False
+        rules = self.rules
+        for name in state["rooms"].keys():
+            last = self.last_action_time.get(name, datetime.min)
+            cooldown_minutes = rules["hysteresis"]["min_action_interval_minutes"]
+            cooldown = timedelta(minutes=cooldown_minutes)
+            if (datetime.now() - last) < cooldown:
+                cooldown_active = True
+                break
+
+        self.set_state("sensor.climatiq_cooldown_active", state="on" if cooldown_active else "off")
+
+        # Active rooms count
+        active_rooms = sum(
+            1 for room in state["rooms"].values() if room["hvac_mode"] in ["heat", "cool"]
+        )
+        self.set_state("sensor.climatiq_active_rooms", state=active_rooms)
+
+        # Critical room (highest delta)
+        critical_room = "none"
+        max_delta = 0
+        for name, room in state["rooms"].items():
+            delta = abs(room["delta"])
+            if delta > max_delta:
+                max_delta = delta
+                critical_room = name
+
+        critical_display = (
+            f"{critical_room} ({max_delta:.1f}K)" if critical_room != "none" else "none"
+        )
+        self.set_state("sensor.climatiq_critical_room", state=critical_display)
+
+    # =========================================================================
     # CONTROL CYCLE
     # =========================================================================
 
@@ -540,6 +806,9 @@ class ClimatIQController(hass.Hass):
             reward = self.calculate_reward(state)
             self.log(f"Reward: {reward['total']:.1f}")
             self.log_episode(state, actions, reward)
+
+            # Update device sensors
+            self._update_device_sensors(state, is_emergency, actions, reward)
 
         except Exception as e:
             self.log(f"Error: {e}", level="ERROR")
