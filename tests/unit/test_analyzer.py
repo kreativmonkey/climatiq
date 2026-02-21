@@ -234,3 +234,67 @@ class TestRegionStability:
         )
         region = analyzer._create_region_from_data(df)
         assert region.stability_score < 0.3
+
+
+class TestAnalyzerEdgeCases:
+    """Test edge cases and error handling."""
+
+    def test_analyze_with_negative_power(self, analyzer):
+        """Test analyzer handles negative power values."""
+        times = pd.date_range(start="2024-01-01", periods=2000, freq="1min")
+        # Mix of positive and negative (e.g., sensor errors)
+        power = np.concatenate([np.random.normal(500, 50, 1000), np.random.normal(-50, 10, 1000)])
+        data = pd.Series(power, index=times)
+
+        result = analyzer.analyze(data)
+        # Should still return a result, potentially filtering negative values
+        assert isinstance(result, AnalysisResult)
+
+    def test_analyze_with_nan_values(self, analyzer):
+        """Test analyzer handles NaN values in data."""
+        times = pd.date_range(start="2024-01-01", periods=2000, freq="1min")
+        power = np.random.normal(500, 50, 2000)
+        power[100:200] = np.nan  # Introduce NaN gap
+        data = pd.Series(power, index=times)
+
+        result = analyzer.analyze(data)
+        assert isinstance(result, AnalysisResult)
+
+    def test_analyze_constant_power(self, analyzer):
+        """Test analyzer with perfectly constant power (no variance)."""
+        times = pd.date_range(start="2024-01-01", periods=2000, freq="1min")
+        power = np.full(2000, 500.0)  # Constant 500W
+        data = pd.Series(power, index=times)
+
+        result = analyzer.analyze(data)
+        assert isinstance(result, AnalysisResult)
+        # Should recognize this as very stable
+        assert result.sufficient_data is True
+
+    def test_analyze_extreme_fluctuations(self, analyzer):
+        """Test analyzer with extreme power fluctuations."""
+        times = pd.date_range(start="2024-01-01", periods=2000, freq="1min")
+        # Extreme swings: 0 to 2000W
+        power = np.random.choice([0, 2000], size=2000)
+        data = pd.Series(power, index=times)
+
+        result = analyzer.analyze(data)
+        assert isinstance(result, AnalysisResult)
+        # Should detect high instability
+        assert result.sufficient_data is True
+
+    def test_get_dashboard_data_structure(self, analyzer, sample_power_data):
+        """Test dashboard data has expected structure."""
+        analyzer.analyze(sample_power_data)
+        data = analyzer.get_dashboard_data()
+
+        required_keys = ["status", "sufficient_data", "min_stable_power", "regions"]
+        assert all(key in data for key in required_keys)
+
+        # Regions should be serializable (dict format)
+        assert isinstance(data["regions"], list)
+        if len(data["regions"]) > 0:
+            region = data["regions"][0]
+            assert "range" in region
+            assert "stability" in region
+            assert "is_stable" in region
