@@ -62,6 +62,38 @@ Delta: 9.0K (emergency!)
 → Emergency override → Actions executed
 ```
 
+### Emergency Cooldown
+
+**Why cooldown in emergencies?**
+
+Even in emergency situations, the controller applies a cooldown (shorter than normal) to prevent overshooting:
+
+- **Normal cooldown:** 15 minutes (default)
+- **Emergency cooldown:** 7 minutes (default)
+
+**Rationale:** Heat pumps take 10-30 minutes for changes to take effect. Without cooldown, the system would:
+1. Detect high delta → Increase target
+2. 5 minutes later: Still high delta (system hasn't stabilized) → Increase again
+3. Result: Overshooting and oscillation
+
+**Configuration:**
+```yaml
+rules:
+  hysteresis:
+    min_action_interval_minutes: 15      # Normal operations
+    emergency_action_interval_minutes: 7  # Emergency situations
+```
+
+**Tuning:**
+- **5 minutes:** Very reactive (allows action every cycle in emergency)
+- **7 minutes:** Balanced (1-2 cycles pause, recommended)
+- **10 minutes:** Conservative (2 cycles pause, safer but slower)
+
+**Logs:** When cooldown is active, you'll see:
+```
+⏳ erdgeschoss: Cooldown active (4.3 min remaining, emergency mode)
+```
+
 #### 3. Hysterese
 - **Cooldown**: Min. 15 Minuten zwischen Actions pro Raum
 
