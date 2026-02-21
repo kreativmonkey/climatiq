@@ -245,7 +245,7 @@ class TestAnalyzerEdgeCases:
         # Mix of positive and negative (e.g., sensor errors)
         power = np.concatenate([np.random.normal(500, 50, 1000), np.random.normal(-50, 10, 1000)])
         data = pd.Series(power, index=times)
-        
+
         result = analyzer.analyze(data)
         # Should still return a result, potentially filtering negative values
         assert isinstance(result, AnalysisResult)
@@ -256,7 +256,7 @@ class TestAnalyzerEdgeCases:
         power = np.random.normal(500, 50, 2000)
         power[100:200] = np.nan  # Introduce NaN gap
         data = pd.Series(power, index=times)
-        
+
         result = analyzer.analyze(data)
         assert isinstance(result, AnalysisResult)
 
@@ -265,7 +265,7 @@ class TestAnalyzerEdgeCases:
         times = pd.date_range(start="2024-01-01", periods=2000, freq="1min")
         power = np.full(2000, 500.0)  # Constant 500W
         data = pd.Series(power, index=times)
-        
+
         result = analyzer.analyze(data)
         assert isinstance(result, AnalysisResult)
         # Should recognize this as very stable
@@ -277,7 +277,7 @@ class TestAnalyzerEdgeCases:
         # Extreme swings: 0 to 2000W
         power = np.random.choice([0, 2000], size=2000)
         data = pd.Series(power, index=times)
-        
+
         result = analyzer.analyze(data)
         assert isinstance(result, AnalysisResult)
         # Should detect high instability
@@ -287,10 +287,10 @@ class TestAnalyzerEdgeCases:
         """Test dashboard data has expected structure."""
         analyzer.analyze(sample_power_data)
         data = analyzer.get_dashboard_data()
-        
+
         required_keys = ["status", "sufficient_data", "min_stable_power", "regions"]
         assert all(key in data for key in required_keys)
-        
+
         # Regions should be serializable (dict format)
         assert isinstance(data["regions"], list)
         if len(data["regions"]) > 0:

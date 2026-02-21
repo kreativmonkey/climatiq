@@ -141,7 +141,7 @@ class TestPredictor:
         # Only 5 datapoints instead of recommended 30
         recent = training_data.tail(5)
         result = predictor.predict(recent)
-        
+
         # Should still return a result
         assert "cycling_predicted" in result
         assert "status" in result
@@ -152,12 +152,12 @@ class TestPredictor:
         result1 = predictor.train(training_data.head(1000))
         assert result1["success"] is True
         first_f1 = result1["metrics"]["f1_mean"]
-        
+
         # Retrain with more data
         result2 = predictor.train(training_data)
         assert result2["success"] is True
         second_f1 = result2["metrics"]["f1_mean"]
-        
+
         # Both should have valid F1 scores
         assert 0 <= first_f1 <= 1
         assert 0 <= second_f1 <= 1
@@ -166,22 +166,22 @@ class TestPredictor:
         """Test that feature importance is available after training."""
         result = predictor.train(training_data)
         assert result["success"] is True
-        
+
         # Feature importance should be accessible via dashboard data
         dashboard = predictor.get_dashboard_data()
         assert "feature_importance" in dashboard
         assert len(dashboard["feature_importance"]) > 0
-        
+
         # All importance values should be between 0 and 1
         assert all(0 <= v <= 1 for v in dashboard["feature_importance"].values())
 
     def test_predict_with_missing_features(self, predictor, training_data):
         """Test predict handles missing features gracefully."""
         predictor.train(training_data)
-        
+
         # Create data with missing columns
         incomplete_data = training_data.tail(30).drop(columns=["hour"], errors="ignore")
-        
+
         # Should either handle it or raise informative error
         try:
             result = predictor.predict(incomplete_data)
@@ -194,20 +194,20 @@ class TestPredictor:
         """Test that saved model maintains same accuracy."""
         with tempfile.TemporaryDirectory() as tmpdir:
             model_path = Path(tmpdir) / "model.joblib"
-            
+
             # Train and save
             predictor1 = CyclingPredictor(model_path=model_path)
             train_result = predictor1.train(training_data)
             assert train_result["success"] is True
             predictor1.save_model()
-            
+
             # Load and compare
             predictor2 = CyclingPredictor(model_path=model_path)
             recent = training_data.tail(100)
-            
+
             result1 = predictor1.predict(recent)
             result2 = predictor2.predict(recent)
-            
+
             # Same model should give same predictions
             assert result1["cycling_predicted"] == result2["cycling_predicted"]
             assert abs(result1["probability"] - result2["probability"]) < 0.01
