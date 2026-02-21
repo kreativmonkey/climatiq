@@ -22,6 +22,21 @@ ClimatIQ analyzes your heat pump's behavior and automatically optimizes room tem
 - 📊 **ML-based Analysis**: Identifies cycling patterns and their causal factors (not just symptoms).
 - 🤖 **RL-Ready**: Logs State-Action-Reward data for future Reinforcement Learning optimization.
 - 🏠 **Home Assistant Integration**: Designed to run as a native AppDaemon app.
+- 🏢 **Multi-Device Support (NEW in v3.1)**: Control multiple outdoor units with independent operating modes.
+
+### 🏢 Multi-Device Support (NEW in v3.1)
+
+ClimatIQ now supports **multiple outdoor units** with independent operating modes!
+
+- ✅ Each outdoor unit has its own power sensor
+- ✅ Independent heat/cool modes per unit
+- ✅ Automatic room on/off control
+- ✅ Night-mode optimization
+- ✅ 100% backward compatible with single-unit configs
+
+**Use Case:** Ground floor heating while upstairs cooling.
+
+[Read full documentation →](docs/MULTI_DEVICE.md)
 
 ### How it Works
 
@@ -101,6 +116,21 @@ mypy climatiq/            # Type checking
 - 📊 **ML-Analyse**: Erkennt Takt-Muster und deren kausale Ursachen.
 - 🤖 **RL-Ready**: Protokolliert State-Action-Reward-Daten für zukünftiges Reinforcement Learning.
 - 🏠 **Home Assistant Integration**: Läuft als AppDaemon-App.
+- 🏢 **Multi-Geräte-Unterstützung (NEU in v3.1)**: Steuerung mehrerer Außeneinheiten mit unabhängigen Betriebsmodi.
+
+### 🏢 Multi-Geräte-Unterstützung (NEU in v3.1)
+
+ClimatIQ unterstützt jetzt **mehrere Außeneinheiten** mit unabhängigen Betriebsmodi!
+
+- ✅ Jede Außeneinheit hat ihren eigenen Leistungssensor
+- ✅ Unabhängige Heiz-/Kühl-Modi pro Einheit
+- ✅ Automatische Raum Ein-/Aus-Steuerung
+- ✅ Nachtmodus-Optimierung
+- ✅ 100% rückwärtskompatibel mit Einzel-Einheit-Konfigurationen
+
+**Anwendungsfall:** Erdgeschoss heizt, während Obergeschoss kühlt.
+
+[Vollständige Dokumentation →](docs/MULTI_DEVICE.md)
 
 ### Funktionsweise
 

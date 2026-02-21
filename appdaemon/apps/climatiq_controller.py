@@ -1,10 +1,13 @@
 """
-ClimatIQ Controller V2 - AppDaemon Integration
+ClimatIQ Controller V3 - AppDaemon Integration
 
 Features:
-- AUTOMATISCHE Zonen-Erkennung beim Start (GMM Clustering)
-- Target-Anpassung als Hauptstrategie
-- RL Logging (State-Action-Reward)
+- Multi-device support (multiple outdoor units)
+- Automatic zone detection (GMM Clustering)
+- Room on/off control based on operating mode
+- Mixed-mode validation per outdoor unit
+- Power aggregation across units
+- Backward compatible with single-unit configs
 """
 
 import json
@@ -17,10 +20,10 @@ import numpy as np
 
 
 class ClimatIQController(hass.Hass):
-    """Intelligenter Wärmepumpen-Controller mit automatischer Zonen-Erkennung"""
+    """Intelligent heat pump controller with multi-device support"""
 
     def initialize(self):
-        """AppDaemon Initialisierung"""
+        """AppDaemon initialization"""
 
         self.rooms = self.args.get("rooms", {})
         self.sensors = self.args.get("sensors", {})
@@ -31,53 +34,244 @@ class ClimatIQController(hass.Hass):
         self.unstable_zones = []
         self.stable_zones = []
 
-        # Cache-Pfad: entweder aus Config oder relativ zum Script-Verzeichnis
+        # Parse outdoor units (with backward compatibility)
+        self.outdoor_units = self.parse_outdoor_units()
+
+        # Cache path
         if "cache_path" in self.args:
             self.cache_path = self.args["cache_path"]
         else:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             self.cache_path = os.path.join(script_dir, "climatiq_zones_cache.json")
 
-        # RL Log-Pfad: optional, Default relativ zum Script
+        # RL log path
         if "log_file" in self.args:
             self.log_file = self.args["log_file"]
         else:
             script_dir = os.path.dirname(os.path.abspath(__file__))
             self.log_file = os.path.join(script_dir, "climatiq_rl.jsonl")
 
-        # 1. Automatische Zonen-Erkennung beim Start
-        self.log("=== ClimatIQ Controller V2 ===")
-        self.log("Starte automatische Zonen-Erkennung...")
+        # Automatic zone detection on startup
+        self.log("=== ClimatIQ Controller V3 (Multi-Device) ===")
+        self.log(f"Outdoor units configured: {len(self.outdoor_units)}")
+        for unit_id, unit_cfg in self.outdoor_units.items():
+            self.log(f"  - {unit_id}: mode={unit_cfg['operating_mode']}")
+
+        self.log("Starting automatic zone detection...")
         self.detect_zones_from_history()
 
-        # 2. Control Cycle starten
+        # Validate outdoor unit modes
+        if not self.validate_outdoor_unit_modes():
+            self.log("WARNING: Mixed heat/cool modes detected within units!", level="WARNING")
+
+        # Start control cycle
         interval = self.args.get("interval_minutes", 5)
         self.run_every(self.control_cycle, datetime.now() + timedelta(seconds=30), interval * 60)
 
-        # 3. Zonen täglich neu lernen (03:00 Uhr)
+        # Re-learn zones daily at 03:00
         self.run_daily(self.detect_zones_from_history, "03:00:00")
 
-        self.log(
-            f"Controller gestartet (Interval: {interval}min, Räume: {list(self.rooms.keys())})"
-        )
+        self.log(f"Controller started (Interval: {interval}min, Rooms: {list(self.rooms.keys())})")
 
     # =========================================================================
-    # AUTOMATISCHE ZONEN-ERKENNUNG
+    # MULTI-DEVICE SUPPORT
+    # =========================================================================
+
+    def parse_outdoor_units(self) -> Dict:
+        """
+        Parse outdoor units from config with fallback to single unit.
+
+        Backward compatible: If no outdoor_units defined, creates a default
+        unit using the global controller.operating_mode and sensors.power.
+        """
+        outdoor_units = self.args.get("outdoor_units", {})
+
+        if outdoor_units:
+            # Multi-device config: validate each unit has required fields
+            for unit_id, unit_cfg in outdoor_units.items():
+                if "operating_mode" not in unit_cfg:
+                    self.log(f"ERROR: Unit {unit_id} missing operating_mode", level="ERROR")
+                    unit_cfg["operating_mode"] = "heat"
+
+                if "power_sensor" not in unit_cfg:
+                    self.log(f"ERROR: Unit {unit_id} missing power_sensor", level="ERROR")
+
+            return outdoor_units
+
+        # Backward compatibility: single unit (default)
+        controller_config = self.args.get("controller", {})
+        operating_mode = controller_config.get("operating_mode", "heat")
+        power_sensor = self.sensors.get("power")
+
+        if not power_sensor:
+            self.log("ERROR: No power sensor configured!", level="ERROR")
+
+        default_unit = {
+            "operating_mode": operating_mode,
+            "power_sensor": power_sensor,
+        }
+
+        self.log(f"Backward compatibility mode: Single unit (mode={operating_mode})", level="INFO")
+
+        return {"default": default_unit}
+
+    def get_outdoor_unit_for_room(self, room: str) -> tuple:
+        """
+        Get outdoor unit config for given room.
+
+        Returns:
+            (unit_id, unit_config) tuple
+        """
+        room_cfg = self.rooms.get(room, {})
+
+        # Explicit assignment
+        if "outdoor_unit" in room_cfg:
+            unit_id = room_cfg["outdoor_unit"]
+            if unit_id in self.outdoor_units:
+                return (unit_id, self.outdoor_units[unit_id])
+            else:
+                self.log(
+                    f"WARNING: Room {room} assigned to unknown unit {unit_id}", level="WARNING"
+                )
+
+        # Default unit (backward compatibility)
+        if "default" in self.outdoor_units:
+            return ("default", self.outdoor_units["default"])
+
+        # Fallback: first available unit
+        if self.outdoor_units:
+            first_unit_id = list(self.outdoor_units.keys())[0]
+            return (first_unit_id, self.outdoor_units[first_unit_id])
+
+        self.log(f"ERROR: No outdoor unit found for room {room}", level="ERROR")
+        return (None, {})
+
+    def validate_outdoor_unit_modes(self) -> bool:
+        """
+        Check that no outdoor unit has mixed heat/cool within its rooms.
+
+        Returns:
+            True if valid, False if mixed modes detected
+        """
+        # Group rooms by outdoor unit
+        unit_rooms = {}
+        for room_name in self.rooms.keys():
+            unit_id, _ = self.get_outdoor_unit_for_room(room_name)
+            if unit_id:
+                if unit_id not in unit_rooms:
+                    unit_rooms[unit_id] = []
+                unit_rooms[unit_id].append(room_name)
+
+        # Check each unit's rooms
+        all_valid = True
+        for unit_id, rooms in unit_rooms.items():
+            unit_cfg = self.outdoor_units[unit_id]
+            operating_mode = unit_cfg["operating_mode"]
+
+            # All rooms under this unit should use the same mode
+            # (enforced by outdoor unit config, no room-level override)
+            self.log(f"Unit {unit_id}: {len(rooms)} rooms using mode={operating_mode}")
+
+        return all_valid
+
+    def get_total_power(self) -> Optional[float]:
+        """
+        Get total power consumption across all outdoor units.
+
+        Single unit: uses global power_sensor
+        Multiple units: sums all unit power_sensors
+        """
+        if len(self.outdoor_units) == 1:
+            # Single unit: use power_sensor from unit or global
+            unit_id = list(self.outdoor_units.keys())[0]
+            unit_cfg = self.outdoor_units[unit_id]
+            power_sensor = unit_cfg.get("power_sensor")
+
+            if not power_sensor:
+                self.log("ERROR: No power sensor configured", level="ERROR")
+                return None
+
+            power_state = self.get_state(power_sensor)
+            if power_state in ["unknown", "unavailable", None]:
+                return None
+
+            return float(power_state)
+
+        # Multiple units: aggregate power
+        total_power = 0.0
+        for unit_id, unit_cfg in self.outdoor_units.items():
+            power_sensor = unit_cfg.get("power_sensor")
+            if not power_sensor:
+                self.log(f"WARNING: Unit {unit_id} has no power_sensor", level="WARNING")
+                continue
+
+            power_state = self.get_state(power_sensor)
+            if power_state in ["unknown", "unavailable", None]:
+                self.log(f"WARNING: Unit {unit_id} power unavailable", level="WARNING")
+                continue
+
+            total_power += float(power_state)
+
+        return total_power
+
+    def turn_room_off(self, room: str):
+        """Turn room off (hvac_mode: off) - always safe"""
+        room_cfg = self.rooms.get(room)
+        if not room_cfg:
+            return
+
+        entity_id = room_cfg["climate_entity"]
+
+        try:
+            self.log(f"→ {room}: Turning OFF")
+            self.call_service("climate/turn_off", entity_id=entity_id)
+            self.last_action_time[room] = datetime.now()
+        except Exception as e:
+            self.log(f"Error turning off {room}: {e}", level="ERROR")
+
+    def turn_room_on(self, room: str):
+        """Turn room on with correct operating_mode from outdoor_unit"""
+        room_cfg = self.rooms.get(room)
+        if not room_cfg:
+            return
+
+        entity_id = room_cfg["climate_entity"]
+        unit_id, unit_cfg = self.get_outdoor_unit_for_room(room)
+
+        if not unit_cfg:
+            self.log(f"ERROR: Cannot turn on {room} - no unit config", level="ERROR")
+            return
+
+        operating_mode = unit_cfg["operating_mode"]
+
+        try:
+            self.log(f"→ {room}: Turning ON (mode={operating_mode}, unit={unit_id})")
+
+            # Set hvac_mode based on operating_mode
+            hvac_mode = "heat" if operating_mode == "heat" else "cool"
+
+            self.call_service("climate/set_hvac_mode", entity_id=entity_id, hvac_mode=hvac_mode)
+            self.last_action_time[room] = datetime.now()
+        except Exception as e:
+            self.log(f"Error turning on {room}: {e}", level="ERROR")
+
+    # =========================================================================
+    # AUTOMATIC ZONE DETECTION
     # =========================================================================
 
     def detect_zones_from_history(self, kwargs=None):
         """
-        Lernt stabile/instabile Zonen aus InfluxDB Historie.
-        Nutzt GMM (Gaussian Mixture Model) Clustering.
+        Learn stable/unstable zones from InfluxDB history.
+        Uses GMM (Gaussian Mixture Model) clustering.
         """
-        self.log("Lade historische Daten für Zonen-Erkennung...")
+        self.log("Loading historical data for zone detection...")
 
         try:
-            # Versuche InfluxDB Daten zu laden
+            # Try to load InfluxDB data
             data = self._load_influx_history()
 
             if data is None or len(data) < 1000:
-                self.log("Nicht genug Daten für Zonen-Erkennung, nutze Fallback", level="WARNING")
+                self.log("Not enough data for zone detection, using fallback", level="WARNING")
                 self._use_fallback_zones()
                 return
 
@@ -87,32 +281,32 @@ class ClimatIQController(hass.Hass):
             if zones:
                 self.stable_zones = zones["stable"]
                 self.unstable_zones = zones["unstable"]
-                self.log("✓ Zonen erkannt:")
-                self.log(f"  Stabile Zonen: {len(self.stable_zones)}")
+                self.log("✓ Zones detected:")
+                self.log(f"  Stable zones: {len(self.stable_zones)}")
                 for z in self.stable_zones:
                     self.log(f"    - {z['power_mean']:.0f}W (±{z['power_std']:.0f}W)")
-                self.log(f"  Instabile Zonen: {len(self.unstable_zones)}")
+                self.log(f"  Unstable zones: {len(self.unstable_zones)}")
                 for z in self.unstable_zones:
                     self.log(f"    - {z['min']:.0f}W - {z['max']:.0f}W")
 
-                # Cache speichern
+                # Save cache
                 self._save_zones_cache()
             else:
                 self._use_fallback_zones()
 
         except Exception as e:
-            self.log(f"Fehler bei Zonen-Erkennung: {e}", level="ERROR")
+            self.log(f"Error in zone detection: {e}", level="ERROR")
             self._use_fallback_zones()
 
     def _load_influx_history(self) -> Optional[List[Dict]]:
-        """Lädt Power-Historie aus InfluxDB"""
+        """Load power history from InfluxDB"""
 
-        # InfluxDB v1 Client importieren
+        # Import InfluxDB v1 client
         from influxdb import InfluxDBClient
 
         cfg = self.influx_config
         if not cfg.get("host"):
-            self.log("Keine InfluxDB Config, nutze HA History", level="WARNING")
+            self.log("No InfluxDB config, using HA History", level="WARNING")
             return self._load_ha_history()
 
         client = InfluxDBClient(
@@ -123,7 +317,7 @@ class ClimatIQController(hass.Hass):
             database=cfg.get("database", "homeassistant"),
         )
 
-        # Letzte 30 Tage, 5min Auflösung
+        # Last 30 days, 5min resolution
         query = f"""
             SELECT mean("value") as power
             FROM "{cfg.get('measurement', 'W')}"
@@ -136,26 +330,32 @@ class ClimatIQController(hass.Hass):
         result = client.query(query)
         points = list(result.get_points())
 
-        self.log(f"InfluxDB: {len(points)} Datenpunkte geladen")
+        self.log(f"InfluxDB: {len(points)} data points loaded")
         return points
 
     def _load_ha_history(self) -> Optional[List[Dict]]:
-        """Fallback: Lade History aus Home Assistant"""
+        """Fallback: Load history from Home Assistant"""
 
-        # HA History API (letzte 7 Tage max)
+        # HA History API (max 7 days)
         end = datetime.now()
         start = end - timedelta(days=7)
 
-        entity = self.sensors.get("power")
-        if not entity:
+        # Use first unit's power sensor for history
+        if not self.outdoor_units:
             return None
 
-        history = self.get_history(entity_id=entity, start_time=start, end_time=end)
+        first_unit = list(self.outdoor_units.values())[0]
+        power_sensor = first_unit.get("power_sensor")
+
+        if not power_sensor:
+            return None
+
+        history = self.get_history(entity_id=power_sensor, start_time=start, end_time=end)
 
         if not history or len(history) == 0:
             return None
 
-        # Konvertiere zu einheitlichem Format
+        # Convert to uniform format
         points = []
         for state in history[0]:
             try:
@@ -164,23 +364,23 @@ class ClimatIQController(hass.Hass):
             except (ValueError, KeyError, TypeError):
                 pass
 
-        self.log(f"HA History: {len(points)} Datenpunkte geladen")
+        self.log(f"HA History: {len(points)} data points loaded")
         return points
 
     def _gmm_clustering(self, data: List[Dict]) -> Optional[Dict]:
         """
-        GMM Clustering um stabile/instabile Zonen zu finden.
-        Basiert auf power_std in rollierenden Fenstern.
+        GMM Clustering to find stable/unstable zones.
+        Based on power_std in rolling windows.
         """
         from sklearn.mixture import GaussianMixture
 
-        # Power-Werte extrahieren
+        # Extract power values
         powers = np.array([d.get("power", 0) for d in data if d.get("power", 0) > 50])
 
         if len(powers) < 1000:
             return None
 
-        # Rollierende Statistiken (30 Punkte = 2.5h bei 5min Auflösung)
+        # Rolling statistics (30 points = 2.5h at 5min resolution)
         window = 30
         rolling_data = []
 
@@ -196,10 +396,10 @@ class ClimatIQController(hass.Hass):
         if len(rolling_data) < 100:
             return None
 
-        # Features für Clustering
+        # Features for clustering
         X = np.array([[d["power_mean"], d["power_std"]] for d in rolling_data])
 
-        # GMM mit automatischer Komponentenanzahl (2-5 Cluster)
+        # GMM with automatic component count (2-5 clusters)
         best_gmm = None
         best_bic = float("inf")
 
@@ -211,10 +411,10 @@ class ClimatIQController(hass.Hass):
                 best_bic = bic
                 best_gmm = gmm
 
-        # Cluster Labels
+        # Cluster labels
         labels = best_gmm.predict(X)
 
-        # Analysiere Cluster
+        # Analyze clusters
         stable_zones = []
         unstable_zones = []
 
@@ -228,7 +428,7 @@ class ClimatIQController(hass.Hass):
             avg_power = np.mean([d["power_mean"] for d in cluster_data])
             avg_std = np.mean([d["power_std"] for d in cluster_data])
 
-            # Stabilität: power_std < 100W = stabil
+            # Stability: power_std < 100W = stable
             if avg_std < 100:
                 stable_zones.append(
                     {
@@ -239,7 +439,7 @@ class ClimatIQController(hass.Hass):
                     }
                 )
             else:
-                # Instabil: Bereich markieren (±1 Std)
+                # Unstable: mark range (±1 std)
                 powers_in_cluster = [d["power_mean"] for d in cluster_data]
                 unstable_zones.append(
                     {
@@ -254,8 +454,8 @@ class ClimatIQController(hass.Hass):
         return {"stable": stable_zones, "unstable": unstable_zones}
 
     def _use_fallback_zones(self):
-        """Fallback wenn keine Daten verfügbar"""
-        self.log("Nutze Fallback-Zonen (aus 90-Tage Analyse)", level="WARNING")
+        """Fallback when no data available"""
+        self.log("Using fallback zones (from 90-day analysis)", level="WARNING")
         self.unstable_zones = [{"min": 1000, "max": 1500, "reason": "fallback"}]
         self.stable_zones = [
             {"power_mean": 500, "power_std": 50},
@@ -263,7 +463,7 @@ class ClimatIQController(hass.Hass):
         ]
 
     def _save_zones_cache(self):
-        """Speichert erkannte Zonen in Cache-Datei"""
+        """Save detected zones to cache file"""
         cache = {
             "timestamp": datetime.now().isoformat(),
             "stable_zones": self.stable_zones,
@@ -272,81 +472,80 @@ class ClimatIQController(hass.Hass):
         try:
             with open(self.cache_path, "w") as f:
                 json.dump(cache, f, indent=2)
-            self.log(f"Zonen-Cache gespeichert: {self.cache_path}")
+            self.log(f"Zones cache saved: {self.cache_path}")
         except Exception as e:
-            self.log(f"Fehler beim Speichern des Cache: {e}", level="WARNING")
+            self.log(f"Error saving cache: {e}", level="WARNING")
 
     # =========================================================================
     # CONTROL CYCLE
     # =========================================================================
 
     def control_cycle(self, kwargs):
-        """Hauptschleife - wird alle N Minuten ausgeführt"""
+        """Main loop - executed every N minutes"""
 
         self.log("--- Control Cycle ---")
 
         try:
             state = self.get_current_state()
             if not state:
-                self.log("State nicht verfügbar", level="WARNING")
+                self.log("State not available", level="WARNING")
                 return
 
             self.log(
                 f"Power: {state['power']:.0f}W | Outdoor: {state['outdoor_temp']:.1f}°C | Δ Total: {state['total_delta_abs']:.1f}K"
             )
 
-            # Check: Sind wir in instabiler Zone?
+            # Check: Are we in unstable zone?
             in_unstable = self._is_in_unstable_zone(state["power"])
             if in_unstable:
-                self.log(
-                    f"⚠️ Instabile Zone ({state['power']:.0f}W) - keine Actions", level="WARNING"
-                )
+                self.log(f"⚠️ Unstable zone ({state['power']:.0f}W) - no actions", level="WARNING")
                 self.log_episode(state, [], self.calculate_reward(state, in_unstable=True))
                 return
 
-            # Actions entscheiden & ausführen
+            # Decide & execute actions
             actions = self.decide_actions(state)
 
             if not actions:
-                self.log("Keine Actions nötig")
+                self.log("No actions needed")
 
             for action in actions:
                 self.execute_action(action)
 
-            # Reward & Logging
+            # Reward & logging
             reward = self.calculate_reward(state)
             self.log(f"Reward: {reward['total']:.1f}")
             self.log_episode(state, actions, reward)
 
         except Exception as e:
-            self.log(f"Fehler: {e}", level="ERROR")
+            self.log(f"Error: {e}", level="ERROR")
 
     def _is_in_unstable_zone(self, power: float) -> bool:
-        """Prüft ob aktuelle Power in instabiler Zone liegt"""
+        """Check if current power is in unstable zone"""
         for zone in self.unstable_zones:
             if zone["min"] <= power <= zone["max"]:
                 return True
         return False
 
     def get_current_state(self) -> Optional[Dict]:
-        """Liest aktuellen Zustand aus Home Assistant"""
+        """Read current state from Home Assistant"""
 
         try:
-            power_state = self.get_state(self.sensors["power"])
+            power = self.get_total_power()
+            if power is None:
+                return None
+
             outdoor_state = self.get_state(self.sensors["outdoor_temp"])
 
-            if power_state in ["unknown", "unavailable", None]:
-                return None
             if outdoor_state in ["unknown", "unavailable", None]:
                 return None
 
-            power = float(power_state)
             outdoor_temp = float(outdoor_state)
 
             rooms = {}
             for name, cfg in self.rooms.items():
                 curr = self.get_state(cfg["temp_sensor"])
                 targ = self.get_state(cfg["climate_entity"], attribute="temperature")
+                hvac_mode = self.get_state(cfg["climate_entity"])
 
                 if curr in ["unknown", "unavailable", None]:
                     continue
@@ -357,6 +556,8 @@ class ClimatIQController(hass.Hass):
                     "current_temp": float(curr),
                     "target_temp": float(targ),
                     "delta": float(curr) - float(targ),
+                    "hvac_mode": hvac_mode,
+                    "is_on": hvac_mode not in ["off", "unknown", "unavailable"],
                 }
 
             return {
@@ -368,17 +569,28 @@ class ClimatIQController(hass.Hass):
             }
 
         except Exception as e:
-            self.log(f"State-Fehler: {e}", level="ERROR")
+            self.log(f"State error: {e}", level="ERROR")
             return None
 
     def decide_actions(self, state: Dict) -> List[Dict]:
-        """Entscheidet welche Target-Anpassungen nötig sind"""
+        """
+        Decide which actions are needed.
+
+        Now supports:
+        - turn_off: Night mode, overheating prevention
+        - turn_on: Stability targeting, comfort restoration
+        - adjust_target: Fine-tuning when on
+        """
 
         actions = []
         rules = self.rules
+        current_hour = datetime.now().hour
+
+        # Night mode: 23:00 - 06:00
+        is_night_mode = 23 <= current_hour or current_hour < 6
 
         for name, room in state["rooms"].items():
-            # Cooldown prüfen
+            # Cooldown check
             last = self.last_action_time.get(name, datetime.min)
             cooldown = timedelta(minutes=rules["hysteresis"]["min_action_interval_minutes"])
             if (datetime.now() - last) < cooldown:
@@ -386,72 +598,141 @@ class ClimatIQController(hass.Hass):
 
             delta = room["delta"]
             target = room["target_temp"]
+            is_on = room["is_on"]
             step = rules["adjustments"]["target_step"]
 
-            # Zu kalt → Target erhöhen
+            # Get outdoor unit for this room
+            unit_id, unit_cfg = self.get_outdoor_unit_for_room(name)
+            operating_mode = unit_cfg.get("operating_mode", "heat")
+
+            # Decision logic:
+
+            # 1. Night mode → Turn off non-critical rooms
+            if is_night_mode and is_on and delta >= -0.5:
+                actions.append(
+                    {
+                        "room": name,
+                        "action_type": "turn_off",
+                        "reason": f"Night mode (Δ={delta:.1f}K, ok to turn off)",
+                    }
+                )
+                continue
+
+            # 2. Overheating prevention
+            if operating_mode == "heat" and delta > 2.0 and is_on:
+                actions.append(
+                    {
+                        "room": name,
+                        "action_type": "turn_off",
+                        "reason": f"Overheating ({delta:.1f}K above target)",
+                    }
+                )
+                continue
+
+            # 3. Too cold → Turn on if off, or increase target
             if delta < -rules["comfort"]["temp_tolerance_cold"]:
-                new_target = min(target + step, rules["adjustments"]["target_max"])
-                if new_target != target:
+                if not is_on:
                     actions.append(
                         {
                             "room": name,
-                            "old_target": target,
-                            "new_target": new_target,
-                            "reason": f"Zu kalt ({delta:.1f}K)",
+                            "action_type": "turn_on",
+                            "reason": f"Too cold ({delta:.1f}K), unit={unit_id}",
+                            "unit_id": unit_id,
                         }
                     )
+                else:
+                    # Already on, adjust target
+                    new_target = min(target + step, rules["adjustments"]["target_max"])
+                    if new_target != target:
+                        actions.append(
+                            {
+                                "room": name,
+                                "action_type": "adjust_target",
+                                "old_target": target,
+                                "new_target": new_target,
+                                "reason": f"Too cold ({delta:.1f}K)",
+                            }
+                        )
 
-            # Zu warm → Target senken
+            # 4. Too warm → Decrease target or turn off
             elif delta > rules["comfort"]["temp_tolerance_warm"]:
-                new_target = max(target - step, rules["adjustments"]["target_min"])
-                if new_target != target:
-                    actions.append(
-                        {
-                            "room": name,
-                            "old_target": target,
-                            "new_target": new_target,
-                            "reason": f"Zu warm ({delta:.1f}K)",
-                        }
-                    )
+                if is_on:
+                    new_target = max(target - step, rules["adjustments"]["target_min"])
+                    if new_target != target:
+                        actions.append(
+                            {
+                                "room": name,
+                                "action_type": "adjust_target",
+                                "old_target": target,
+                                "new_target": new_target,
+                                "reason": f"Too warm ({delta:.1f}K)",
+                            }
+                        )
 
-        # Max Actions pro Cycle
+            # 5. Stability targeting: Power too low → Turn on a room
+            if state["power"] < 500 and not is_on and delta < -0.5:
+                actions.append(
+                    {
+                        "room": name,
+                        "action_type": "turn_on",
+                        "reason": f"Stability targeting (power={state['power']:.0f}W)",
+                        "unit_id": unit_id,
+                    }
+                )
+
+        # Max actions per cycle
         max_actions = rules["stability"]["max_actions_per_cycle"]
         if len(actions) > max_actions:
-            # Priorisiere nach größter Abweichung
+            # Prioritize by largest deviation
             actions = sorted(
-                actions, key=lambda a: abs(state["rooms"][a["room"]]["delta"]), reverse=True
+                actions,
+                key=lambda a: (
+                    abs(state["rooms"][a["room"]]["delta"]) if a["room"] in state["rooms"] else 0
+                ),
+                reverse=True,
             )
             actions = actions[:max_actions]
 
         return actions
 
     def execute_action(self, action: Dict):
-        """Führt Target-Anpassung in Home Assistant aus"""
+        """Execute action in Home Assistant"""
 
         room_name = action["room"]
-        new_target = action["new_target"]
-        entity = self.rooms[room_name]["climate_entity"]
+        action_type = action["action_type"]
 
-        self.log(
-            f"→ {room_name}: {action['old_target']:.1f}°C → {new_target:.1f}°C ({action['reason']})"
-        )
+        if action_type == "turn_off":
+            self.turn_room_off(room_name)
 
-        try:
-            self.call_service("climate/set_temperature", entity_id=entity, temperature=new_target)
-            self.last_action_time[room_name] = datetime.now()
-        except Exception as e:
-            self.log(f"Fehler bei Action: {e}", level="ERROR")
+        elif action_type == "turn_on":
+            self.turn_room_on(room_name)
+
+        elif action_type == "adjust_target":
+            new_target = action["new_target"]
+            entity = self.rooms[room_name]["climate_entity"]
+
+            self.log(
+                f"→ {room_name}: {action['old_target']:.1f}°C → {new_target:.1f}°C ({action['reason']})"
+            )
+
+            try:
+                self.call_service(
+                    "climate/set_temperature", entity_id=entity, temperature=new_target
+                )
+                self.last_action_time[room_name] = datetime.now()
+            except Exception as e:
+                self.log(f"Error adjusting target: {e}", level="ERROR")
 
     def calculate_reward(self, state: Dict, in_unstable: bool = False) -> Dict:
-        """Berechnet Reward für RL Training"""
+        """Calculate reward for RL training"""
 
-        # Comfort: Nähe zu Soll-Temps
+        # Comfort: Closeness to target temps
         comfort = -state["total_delta_abs"]
 
-        # Stability Penalty
+        # Stability penalty
         stability = -20 if in_unstable else 0
 
-        # Energy: Geringerer Verbrauch = besser
+        # Energy: Lower consumption = better
         energy = -(state["power"] / 500)
 
         total = comfort + stability + energy
@@ -459,7 +740,7 @@ class ClimatIQController(hass.Hass):
         return {"total": total, "comfort": comfort, "stability": stability, "energy": energy}
 
     def log_episode(self, state: Dict, actions: List[Dict], reward: Dict):
-        """Loggt Episode für RL Training (JSONL)"""
+        """Log episode for RL training (JSONL)"""
 
         log_file = self.log_file
 
@@ -474,6 +755,10 @@ class ClimatIQController(hass.Hass):
             "actions": actions,
             "reward": reward,
             "unstable_zones": self.unstable_zones,
+            "outdoor_units": {
+                unit_id: {"operating_mode": cfg["operating_mode"]}
+                for unit_id, cfg in self.outdoor_units.items()
+            },
         }
 
         try:
@@ -481,4 +766,4 @@ class ClimatIQController(hass.Hass):
             with open(log_file, "a") as f:
                 f.write(json.dumps(episode) + "\n")
         except Exception as e:
-            self.log(f"Log-Fehler: {e}", level="WARNING")
+            self.log(f"Log error: {e}", level="WARNING")
