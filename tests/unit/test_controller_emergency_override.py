@@ -4,15 +4,22 @@ Unit tests for emergency override logic in ClimatIQ Controller
 Tests TWO types of emergencies:
 1. Comfort Emergency: Individual room outside tolerance zone
 2. Stability Emergency: Power oscillating (high fluctuation)
+
+Note: This test file uses module-level mocking for appdaemon dependencies.
 """
 
 import statistics
 import sys
 from datetime import datetime, timedelta
+from pathlib import Path
 from unittest.mock import MagicMock, Mock
 
+# Add the project root to path so we can import from appdaemon/apps
+project_root = Path(__file__).parent.parent.parent
+sys.path.insert(0, str(project_root))
 
-# Mock appdaemon dependencies BEFORE importing controller
+
+# Mock appdaemon.plugins.hass.hassapi BEFORE importing controller
 class MockHass:
     """Mock Hass base class for controller inheritance"""
 
@@ -20,26 +27,27 @@ class MockHass:
         pass
 
 
-# Create mock module structure
+# Create mock module structure for appdaemon.plugins.hass.hassapi
+# We need to create the full hierarchy as real module objects
 mock_hassapi = type(sys)("appdaemon.plugins.hass.hassapi")
 mock_hassapi.Hass = MockHass
 
-mock_hass = type(sys)("appdaemon.plugins.hass")
-mock_hass.hassapi = mock_hassapi
+mock_hass_module = type(sys)("appdaemon.plugins.hass")
+mock_hass_module.hassapi = mock_hassapi
 
 mock_plugins = type(sys)("appdaemon.plugins")
-mock_plugins.hass = mock_hass
+mock_plugins.hass = mock_hass_module
 
-sys.modules["appdaemon.plugins.hass.hassapi"] = mock_hassapi
-sys.modules["appdaemon.plugins.hass"] = mock_hass
+# Only mock the plugins part, not appdaemon itself (which is a local directory)
 sys.modules["appdaemon.plugins"] = mock_plugins
+sys.modules["appdaemon.plugins.hass"] = mock_hass_module
+sys.modules["appdaemon.plugins.hass.hassapi"] = mock_hassapi
 
-# Mock numpy and influxdb dependencies
-sys.modules["numpy"] = MagicMock()
+# Mock influxdb
 mock_influxdb = MagicMock()
 sys.modules["influxdb"] = mock_influxdb
 
-# Import controller after mocking dependencies
+# Now import the controller (appdaemon/apps/climatiq_controller.py)
 from appdaemon.apps.climatiq_controller import ClimatIQController  # noqa: E402
 
 
