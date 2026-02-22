@@ -11,13 +11,20 @@ import sys
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, Mock, patch
 
-# Mock appdaemon before importing controller
-sys.modules["appdaemon"] = MagicMock()
-sys.modules["appdaemon.plugins"] = MagicMock()
-sys.modules["appdaemon.plugins.hass"] = MagicMock()
-sys.modules["appdaemon.plugins.hass.hassapi"] = MagicMock()
 
-from appdaemon.apps.climatiq_controller import ClimatIQController
+def _setup_mocks():
+    """Setup appdaemon mocks before importing controller"""
+    sys.modules["appdaemon"] = MagicMock()
+    sys.modules["appdaemon.plugins"] = MagicMock()
+    sys.modules["appdaemon.plugins.hass"] = MagicMock()
+    sys.modules["appdaemon.plugins.hass.hassapi"] = MagicMock()
+
+
+# Setup mocks once at module level
+_setup_mocks()
+
+# Import after mocking (ruff: noqa: E402)
+from appdaemon.apps.climatiq_controller import ClimatIQController  # noqa: E402
 
 
 class TestComfortEmergency:
