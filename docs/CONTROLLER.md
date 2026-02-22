@@ -35,67 +35,72 @@ State → Rules → Actions → Execution → Reward → Log
 - **Power-Zone**: Vermeide Actions bei 1000-1500W (instabil)
 - **Total Delta**: Wenn > 10K, nur größte Abweichung korrigieren
 
-##### Emergency Override
+#### 3. Hysterese
+- **Cooldown**: Min. 15 Minuten zwischen Actions pro Raum (Normal)
+- **Emergency Cooldown**: 7 Minuten (bei Notfall-Situationen)
 
-**Problem:** If the system is in an unstable power zone (1000-1500W) with high temperature delta, waiting would make the situation worse.
+## Emergency Override
 
-**Solution:** Emergency delta threshold
+The controller has TWO types of emergency conditions that bypass normal constraints:
 
-- **Normal operation** (delta ≤6K): Avoid actions in unstable zones
-- **Emergency** (delta >6K): Override unstable zone check and take corrective action
+### 1. Comfort Emergency
 
-**Configuration:**
-```yaml
-stability:
-  emergency_delta_threshold: 6.0  # Kelvin
-```
-
-**Why 6K?**
-- Normal delta: 1-3K (comfortable)
-- High delta: 4-5K (needs attention)
-- Emergency: ≥6K (multiple rooms far from target, MUST correct)
-
-**Example:**
-```
-Power: 973W (unstable zone)
-Delta: 9.0K (emergency!)
-→ Emergency override → Actions executed
-```
-
-### Emergency Cooldown
-
-**Why cooldown in emergencies?**
-
-Even in emergency situations, the controller applies a cooldown (shorter than normal) to prevent overshooting:
-
-- **Normal cooldown:** 15 minutes (default)
-- **Emergency cooldown:** 7 minutes (default)
-
-**Rationale:** Heat pumps take 10-30 minutes for changes to take effect. Without cooldown, the system would:
-1. Detect high delta → Increase target
-2. 5 minutes later: Still high delta (system hasn't stabilized) → Increase again
-3. Result: Overshooting and oscillation
+**Trigger:** Individual room outside comfort tolerance zone
 
 **Configuration:**
 ```yaml
 rules:
-  hysteresis:
-    min_action_interval_minutes: 15      # Normal operations
-    emergency_action_interval_minutes: 7  # Emergency situations
+  comfort:
+    temp_tolerance_cold: 1.5  # Room delta < -1.5K → too cold
+    temp_tolerance_warm: 1.0  # Room delta > +1.0K → too warm
 ```
 
-**Tuning:**
-- **5 minutes:** Very reactive (allows action every cycle in emergency)
-- **7 minutes:** Balanced (1-2 cycles pause, recommended)
-- **10 minutes:** Conservative (2 cycles pause, safer but slower)
+**Behavior:**
+- Each room checked individually
+- If ANY room exceeds tolerance → comfort emergency
+- Uses shorter cooldown (7 min vs 15 min)
+- Logs which room(s) triggered emergency
 
-**Logs:** When cooldown is active, you'll see:
+**Example:**
 ```
-⏳ erdgeschoss: Cooldown active (4.3 min remaining, emergency mode)
+🚨 Comfort Emergency! Room(s) outside tolerance zone
+  ❄️ bedroom: Too cold! Delta -1.8K (threshold: -1.5K)
 ```
 
-#### 3. Hysterese
-- **Cooldown**: Min. 15 Minuten zwischen Actions pro Raum
+### 2. Stability Emergency
+
+**Trigger:** Power oscillating/fluctuating heavily in last 15 minutes
+
+**Configuration:**
+```yaml
+rules:
+  stability:
+    power_std_threshold: 300      # W - Standard deviation threshold
+    power_range_threshold: 800    # W - Range (max-min) threshold
+```
+
+**Behavior:**
+- Queries last 15 minutes of power data from InfluxDB
+- Calculates standard deviation and range
+- If EITHER threshold exceeded → stability emergency
+- NOT about being in unstable zone (1000-1500W)
+- About fluctuation: Is system settling or oscillating?
+
+**Philosophy:** *"If the controller manages to keep the system stable in an 'unstable zone', that's fine. What matters is fluctuation, not the zone itself."*
+
+**Example:**
+```
+🚨 Stability Emergency! Power oscillating
+  ⚡ Power oscillating: StdDev=370W, Range=900W (mean=1100W, last 15min)
+```
+
+### Emergency Cooldown
+
+In emergency situations, the controller uses a shorter cooldown:
+- Normal operations: 15 minutes
+- Emergency: 7 minutes
+
+This allows faster correction while still preventing overshooting.
 
 ### State
 
