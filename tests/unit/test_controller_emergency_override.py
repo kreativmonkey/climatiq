@@ -9,7 +9,7 @@ Tests TWO types of emergencies:
 import statistics
 import sys
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, Mock, patch
+from unittest.mock import MagicMock, Mock
 
 
 # Mock appdaemon dependencies BEFORE importing controller
@@ -36,7 +36,8 @@ sys.modules["appdaemon.plugins"] = mock_plugins
 
 # Mock numpy and influxdb dependencies
 sys.modules["numpy"] = MagicMock()
-sys.modules["influxdb"] = MagicMock()
+mock_influxdb = MagicMock()
+sys.modules["influxdb"] = mock_influxdb
 
 # Import controller after mocking dependencies
 from appdaemon.apps.climatiq_controller import ClimatIQController  # noqa: E402
@@ -61,7 +62,7 @@ class TestComfortEmergency:
         # State with room too cold
         state = {
             "rooms": {
-                "living": {"delta": -2.0, "target": 21.0, "current": 19.0},
+                "living": {"delta": -2.0, "target_temp": 21.0, "current": 19.0},
             }
         }
 
@@ -82,7 +83,7 @@ class TestComfortEmergency:
 
         state = {
             "rooms": {
-                "living": {"delta": 1.5, "target": 21.0, "current": 22.5},
+                "living": {"delta": 1.5, "target_temp": 21.0, "current": 22.5},
             }
         }
 
@@ -158,8 +159,7 @@ class TestStabilityEmergency:
         assert std < 300
         assert range_val < 800
 
-    @patch("appdaemon.apps.climatiq_controller.InfluxDBClient")
-    def test_stability_emergency_with_influxdb(self, mock_influx_client):
+    def test_stability_emergency_with_influxdb(self):
         """Test stability emergency check with InfluxDB integration"""
         controller = ClimatIQController(None, None, None, None, None, None, None, None)
         controller.log = MagicMock()
@@ -179,8 +179,9 @@ class TestStabilityEmergency:
             "measurement": "W",
         }
 
+        # Mock the InfluxDBClient that gets imported inside the method
         mock_client_instance = MagicMock()
-        mock_influx_client.return_value = mock_client_instance
+        mock_influxdb.InfluxDBClient.return_value = mock_client_instance
 
         mock_points = [
             {"power": 500},
@@ -201,8 +202,7 @@ class TestStabilityEmergency:
         result = controller._check_stability_emergency(state)
         assert result is True
 
-    @patch("appdaemon.apps.climatiq_controller.InfluxDBClient")
-    def test_stability_no_emergency_with_stable_data(self, mock_influx_client):
+    def test_stability_no_emergency_with_stable_data(self):
         """Test no stability emergency when power is stable"""
         controller = ClimatIQController(None, None, None, None, None, None, None, None)
         controller.log = MagicMock()
@@ -222,8 +222,9 @@ class TestStabilityEmergency:
             "measurement": "W",
         }
 
+        # Mock the InfluxDBClient
         mock_client_instance = MagicMock()
-        mock_influx_client.return_value = mock_client_instance
+        mock_influxdb.InfluxDBClient.return_value = mock_client_instance
 
         mock_points = [
             {"power": 1500},
@@ -289,12 +290,13 @@ class TestEmergencyCooldown:
             return_value=("default", {"operating_mode": "heat"})
         )
 
+        # Use target_temp (not target) to match controller expectation
         state = {
             "power": 1000,
             "rooms": {
                 "living": {
                     "delta": -2.0,
-                    "target": 21.0,
+                    "target_temp": 21.0,
                     "current": 19.0,
                     "is_on": False,
                 }
@@ -311,4 +313,3 @@ class TestEmergencyCooldown:
 
         actions_emergency = controller.decide_actions(state, is_emergency=True)
         assert len(actions_emergency) > 0
-
