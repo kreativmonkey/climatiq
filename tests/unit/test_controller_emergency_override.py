@@ -8,7 +8,7 @@ Tests TWO types of emergencies:
 
 import statistics
 from datetime import datetime, timedelta
-from unittest.mock import MagicMock, Mock, patch, PropertyMock
+from unittest.mock import MagicMock, Mock, patch
 
 
 class TestComfortEmergency:
