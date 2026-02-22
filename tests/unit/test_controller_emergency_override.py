@@ -11,6 +11,7 @@ import sys
 from datetime import datetime, timedelta
 from unittest.mock import MagicMock, Mock, patch
 
+
 # Mock appdaemon dependencies BEFORE importing controller
 class MockHass:
     """Mock Hass base class for controller inheritance"""
@@ -32,6 +33,10 @@ mock_plugins.hass = mock_hass
 sys.modules["appdaemon.plugins.hass.hassapi"] = mock_hassapi
 sys.modules["appdaemon.plugins.hass"] = mock_hass
 sys.modules["appdaemon.plugins"] = mock_plugins
+
+# Mock numpy and influxdb dependencies
+sys.modules["numpy"] = MagicMock()
+sys.modules["influxdb"] = MagicMock()
 
 # Import controller after mocking dependencies
 from appdaemon.apps.climatiq_controller import ClimatIQController  # noqa: E402
@@ -306,3 +311,4 @@ class TestEmergencyCooldown:
 
         actions_emergency = controller.decide_actions(state, is_emergency=True)
         assert len(actions_emergency) > 0
+
