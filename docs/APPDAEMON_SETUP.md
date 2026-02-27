@@ -205,6 +205,61 @@ Wenn du Grafana hast, visualisiere:
 
 ---
 
+## 📊 ClimatIQ Device & Sensors
+
+ClimatIQ erstellt automatisch ein Home Assistant Gerät mit 12 Sensor-Entitäten:
+
+### System-Metriken
+- **sensor.climatiq_power** - Aktuelle Leistung (W)
+- **sensor.climatiq_outdoor_temp** - Außentemperatur (°C)
+- **sensor.climatiq_total_delta** - Gesamte Raumabweichung (K)
+- **sensor.climatiq_stability_state** - Systemzustand (stable/unstable/transition)
+
+### Performance-Metriken
+- **sensor.climatiq_cycles_today** - Kompressor-Zyklen heute
+- **sensor.climatiq_actions_today** - Controller-Aktionen heute
+- **sensor.climatiq_last_reward** - Letzter Reward-Wert
+- **sensor.climatiq_compressor_runtime** - Laufzeit % heute
+
+### Status-Metriken
+- **sensor.climatiq_emergency_active** - Emergency-Override aktiv (ja/nein)
+- **sensor.climatiq_cooldown_active** - Cooldown aktiv (ja/nein)
+- **sensor.climatiq_active_rooms** - Anzahl aktiver Räume
+- **sensor.climatiq_critical_room** - Raum mit höchster Abweichung
+
+### Verwendung
+
+**Dashboard-Karte:**
+```yaml
+type: entities
+title: ClimatIQ System
+entities:
+  - sensor.climatiq_power
+  - sensor.climatiq_outdoor_temp
+  - sensor.climatiq_total_delta
+  - sensor.climatiq_stability_state
+  - sensor.climatiq_cycles_today
+  - sensor.climatiq_actions_today
+  - sensor.climatiq_emergency_active
+  - sensor.climatiq_critical_room
+```
+
+**Automatisierung (Beispiel):**
+```yaml
+automation:
+  - alias: "ClimatIQ Emergency Alert"
+    trigger:
+      - platform: state
+        entity_id: sensor.climatiq_emergency_active
+        to: "on"
+    action:
+      - service: notify.mobile_app
+        data:
+          message: "ClimatIQ Emergency! Delta: {{ states('sensor.climatiq_total_delta') }}K"
+```
+
+---
+
 ## 🐛 Troubleshooting
 
 ### Controller startet nicht
