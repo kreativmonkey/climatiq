@@ -297,26 +297,22 @@ class ClimatIQController(hass.Hass):
                 f"Power: {state['power']:.0f}W | Outdoor: {state['outdoor_temp']:.1f}°C | Δ Total: {state['total_delta_abs']:.1f}K"
             )
 
-            # Check: Sind wir in instabiler Zone?
+            # Check: Sind wir in instabiler Zone (OSZILLIEREND)?
             in_unstable = self._is_in_unstable_zone(state["power"])
+
+            # LOGIC FIX: Unstable = oscillating = BAD → Need to ACT, not do nothing!
+            # The algorithm should ALWAYS try to optimize, not give up when "unstable"
+
             if in_unstable:
                 self.log(
-                    f"⚠️ Instabile Zone ({state['power']:.0f}W) - keine Actions", level="WARNING"
-                )
-                self.log_episode(state, [], self.calculate_reward(state, in_unstable=True))
-                return
-
-            # Check: Power too low given heat demand? (NEW: Heat Demand Inference)
-            if self._is_power_too_low_for_heat_demand(state):
-                self.log(
-                    f"⚠️ Power zu niedrig für Wärmebedarf ({state['power']:.0f}W) - keine Actions",
+                    f"⚠️ Power OSZILLIEREND ({state['power']:.0f}W)! Starte Stabilisierung...",
                     level="WARNING",
                 )
-                self.log_episode(state, [], self.calculate_reward(state, in_unstable=True))
-                return
-
-            # Actions entscheiden & ausführen
-            actions = self.decide_actions(state)
+                # Try stabilization strategies (sequentially)
+                actions = self._decide_stabilization_actions(state)
+            else:
+                # Stable: Optimize for comfort + minimum power
+                actions = self.decide_actions(state)
 
             if not actions:
                 self.log("Keine Actions nötig")
@@ -336,6 +332,91 @@ class ClimatIQController(hass.Hass):
         """Prüft ob aktuelle Power in instabiler Zone liegt"""
         in_unstable, _ = self._check_unstable_zone_hysteresis(power)
         return in_unstable
+
+    def _decide_stabilization_actions(self, state: Dict) -> List[Dict]:
+        """Try to stabilize oscillating power consumption.
+
+        Strategies tried sequentially:
+        1. Reduce targets on warm rooms (reduce fighting)
+        2. Turn off lowest priority room (remove load)
+        3. Increase targets (let rooms reach temp so units can idle)
+        """
+        actions = []
+        rules = self.rules
+        rooms = state["rooms"]
+
+        # Strategy 1: Reduce targets on WARM rooms (reduce fighting between units)
+        warm_rooms = [
+            (name, room)
+            for name, room in rooms.items()
+            if room.get("is_on", False) and room["delta"] > 0.5
+        ]
+        warm_rooms.sort(key=lambda x: x[1]["delta"], reverse=True)  # warmest first
+
+        for name, room in warm_rooms[:1]:  # Try 1 room
+            target = room["target_temp"]
+            step = rules["adjustments"]["target_step"]
+            new_target = max(target - step, rules["adjustments"]["target_min"])
+            if new_target != target:
+                actions.append(
+                    {
+                        "room": name,
+                        "old_target": target,
+                        "new_target": new_target,
+                        "reason": f"Stabilisierung: Reduziere {room['delta']:.1f}K zu warmer Raum",
+                        "action_direction": ActionDirection.COOLING,
+                    }
+                )
+                self.log(f"  → Strategie 1: Reduziere {name} Target {target}→{new_target}°C")
+                return actions  # Execute one at a time, observe effect
+
+        # Strategy 2: Turn OFF lowest priority warm room
+        off_candidates = [
+            (name, room)
+            for name, room in rooms.items()
+            if room.get("is_on", False) and room["delta"] > 0.3
+        ]
+        if off_candidates:
+            # Sort by delta (warmest first = lowest priority)
+            off_candidates.sort(key=lambda x: x[1]["delta"], reverse=True)
+            name, room = off_candidates[0]
+            actions.append(
+                {
+                    "room": name,
+                    "action_type": "turn_off",
+                    "reason": f"Stabilisierung: Schalte aus ({room['delta']:.1f}K über Target)",
+                }
+            )
+            self.log(f"  → Strategie 2: Schalte {name} AUS (zu warm)")
+            return actions
+
+        # Strategy 3: Increase targets on COLD rooms (let them reach temp, then idle)
+        cold_rooms = [
+            (name, room)
+            for name, room in rooms.items()
+            if room.get("is_on", False) and room["delta"] < -1.0
+        ]
+        cold_rooms.sort(key=lambda x: x[1]["delta"])  # coldest first
+
+        for name, room in cold_rooms[:1]:
+            target = room["target_temp"]
+            step = rules["adjustments"]["target_step"]
+            new_target = min(target + step, rules["adjustments"]["target_max"])
+            if new_target != target:
+                actions.append(
+                    {
+                        "room": name,
+                        "old_target": target,
+                        "new_target": new_target,
+                        "reason": f"Stabilisierung: Erhöhe {name} für Idle",
+                        "action_direction": ActionDirection.HEATING,
+                    }
+                )
+                self.log(f"  → Strategie 3: Erhöhe {name} Target {target}→{new_target}°C")
+                return actions
+
+        self.log("  → Keine Stabilisierung möglich")
+        return []
 
     def _check_unstable_zone_hysteresis(self, power: float) -> tuple[bool, str]:
         """Check unstable zone with hysteresis - prevents rapid zone transitions"""
