@@ -49,7 +49,7 @@ class ClimatIQController(hass.Hass):
         self.power_hysteresis_state: Optional[str] = None
 
         # 1. Automatische Zonen-Erkennung beim Start
-        self.log("=== ClimatIQ Controller V2 ===")
+        self.log("=== ClimatIQ Controller V3.1 ===")
         self.log("Starte automatische Zonen-Erkennung...")
         self.detect_zones_from_history()
 
