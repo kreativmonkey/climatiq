@@ -13,7 +13,7 @@ climatiq_controller:
   interval_minutes: 5
   
   # Log file für RL Training
-  log_file: /config/appdaemon/logs/climatiq_rl.jsonl
+  log_file: /config/addon_configs/a0d7b954_appdaemon/climatiq_rl.jsonl
   
   # InfluxDB für historische Daten (Zonen-Erkennung)
   # Falls nicht konfiguriert: nutzt HA History (nur 7 Tage)
