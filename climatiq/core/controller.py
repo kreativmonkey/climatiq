@@ -134,12 +134,23 @@ class Controller:
     ) -> ControlAction:
         """v2 Decision Logic: Stabilize and Minimize."""
 
-        # 1. Evaluate Stability Metrics
+        # 1. Check unstable power zones with hysteresis
+        unstable_zones = analysis.get("unstable_zones", [])
+        in_unstable, zone_reason = self._check_unstable_zone_hysteresis(
+            status.power_consumption, unstable_zones
+        )
+        if in_unstable:
+            logger.warning(f"⚠️ Instabile Zone ({status.power_consumption}W) - {zone_reason}")
+            return ControlAction(ActionType.NO_ACTION, reason=f"Power-Hysterese: {zone_reason}")
+
+        # 2. Evaluate Stability Metrics
         cycling_risk = status.cycling_risk  # Our v2 score (0-1.0)
         power_std = analysis.get("power_std", 0.0)
         power_spread = analysis.get("power_spread", 0.0)
         current_power = status.power_consumption
-        min_stable_power = analysis.get("min_stable_power", 450.0)
+
+        # Use dynamic threshold based on heat demand
+        min_stable_power = self._calculate_min_stable_power(status)
 
         is_unstable = (
             cycling_risk > 0.6
@@ -151,22 +162,30 @@ class Controller:
         if not is_unstable and current_power >= min_stable_power:
             return ControlAction(ActionType.NO_ACTION, reason="System stabil und effizient.")
 
-        # 2. Night Mode Strategy (Preemptive)
+        # 3. Check if power too low given heat demand (NEW: Heat Demand Inference)
+        if self._is_power_too_low_for_heat_demand(status):
+            return ControlAction(
+                ActionType.NO_ACTION, reason="Power zu niedrig für Wärmebedarf (idle ist OK)"
+            )
+
+        # 4. Night Mode Strategy (Preemptive)
         if self.is_night_mode() and is_unstable:
             action = self._strategy_night_mode(status, min_stable_power)
             if action.action_type != ActionType.NO_ACTION:
+                self._track_action_direction(action.target_unit, action)
                 self.stats["night_mode_actions"] += 1
                 return action
 
-        # 3. Stability Targeting (Load Balancing)
+        # 5. Stability Targeting (Load Balancing)
         # If power is too low to be stable or variance is high
         if current_power < min_stable_power or is_unstable:
             action = self._strategy_stability_targeting(status, min_stable_power, power_std)
             if action.action_type != ActionType.NO_ACTION:
+                self._track_action_direction(action.target_unit, action)
                 self.stats["stability_actions"] += 1
                 return action
 
-        # 4. Gradual Nudge (Temperature)
+        # 6. Gradual Nudge (Temperature)
         # If we just need a tiny bit more load to reach stability
         if is_unstable:
             action = self._strategy_gradual_nudge(status)
@@ -278,6 +297,22 @@ class Controller:
 
         logger.debug(f"Power OK: {current_power:.0f}W >= {min_stable:.0f}W")
         return False
+
+    def _track_action_direction(self, target_unit: Optional[str], action: ControlAction):
+        """Track action direction for temperature hysteresis."""
+        if target_unit is None:
+            return
+
+        if action.action_type == ActionType.ADJUST_TEMP:
+            new_temp = action.parameters.get("temperature")
+            prev_temp = action.parameters.get("previous")
+            if new_temp is not None and prev_temp is not None:
+                if new_temp > prev_temp:
+                    self._unit_action_direction[target_unit] = ActionDirection.HEATING
+                elif new_temp < prev_temp:
+                    self._unit_action_direction[target_unit] = ActionDirection.COOLING
+        elif action.action_type == ActionType.ENABLE_UNIT:
+            self._unit_action_direction[target_unit] = ActionDirection.HEATING
 
     # --- Strategies ---
 

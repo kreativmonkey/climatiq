@@ -306,6 +306,15 @@ class ClimatIQController(hass.Hass):
                 self.log_episode(state, [], self.calculate_reward(state, in_unstable=True))
                 return
 
+            # Check: Power too low given heat demand? (NEW: Heat Demand Inference)
+            if self._is_power_too_low_for_heat_demand(state):
+                self.log(
+                    f"⚠️ Power zu niedrig für Wärmebedarf ({state['power']:.0f}W) - keine Actions",
+                    level="WARNING",
+                )
+                self.log_episode(state, [], self.calculate_reward(state, in_unstable=True))
+                return
+
             # Actions entscheiden & ausführen
             actions = self.decide_actions(state)
 
@@ -502,22 +511,24 @@ class ClimatIQController(hass.Hass):
             current_dir = self.room_action_direction.get(name, ActionDirection.NONE)
 
             if current_dir == ActionDirection.HEATING:
-                # After heating, room must be warmer than target + hysteresis before cooling
-                if delta > -hyst_reverse:
+                # After heating, room must be warmer than target + hysteresis BEFORE cooling
+                # This means delta must be > +hyst_reverse (room is above target + hysteresis)
+                if delta > hyst_reverse:
                     self.room_action_direction[name] = ActionDirection.NONE
                 else:
                     self.log(
-                        f"⏳ {name}: Hysteresis active (heating, warte auf Δ > -{hyst_reverse}K)",
+                        f"⏳ {name}: Hysteresis active (heating, warte bis delta > +{hyst_reverse}K)",
                         level="DEBUG",
                     )
 
             elif current_dir == ActionDirection.COOLING:
-                # After cooling, room must be cooler than target - hysteresis before heating
-                if delta < hyst_reverse:
+                # After cooling, room must be cooler than target - hysteresis BEFORE heating
+                # This means delta must be < -hyst_reverse (room is below target - hysteresis)
+                if delta < -hyst_reverse:
                     self.room_action_direction[name] = ActionDirection.NONE
                 else:
                     self.log(
-                        f"⏳ {name}: Hysteresis active (cooling, warte auf Δ < {hyst_reverse}K)",
+                        f"⏳ {name}: Hysteresis active (cooling, warte bis delta < -{hyst_reverse}K)",
                         level="DEBUG",
                     )
 
@@ -531,9 +542,9 @@ class ClimatIQController(hass.Hass):
                             "old_target": target,
                             "new_target": new_target,
                             "reason": f"Zu kalt ({delta:.1f}K)",
+                            "action_direction": ActionDirection.HEATING,
                         }
                     )
-                    self.room_action_direction[name] = ActionDirection.HEATING
 
             # Zu warm → Target senken
             elif delta > rules["comfort"]["temp_tolerance_warm"]:
@@ -545,9 +556,9 @@ class ClimatIQController(hass.Hass):
                             "old_target": target,
                             "new_target": new_target,
                             "reason": f"Zu warm ({delta:.1f}K)",
+                            "action_direction": ActionDirection.COOLING,
                         }
                     )
-                    self.room_action_direction[name] = ActionDirection.COOLING
 
         # Max Actions pro Cycle
         max_actions = rules["stability"]["max_actions_per_cycle"]
@@ -565,15 +576,20 @@ class ClimatIQController(hass.Hass):
 
         room_name = action["room"]
         new_target = action["new_target"]
+        old_target = action["old_target"]
         entity = self.rooms[room_name]["climate_entity"]
+        action_direction = action.get("action_direction")
 
-        self.log(
-            f"→ {room_name}: {action['old_target']:.1f}°C → {new_target:.1f}°C ({action['reason']})"
-        )
+        self.log(f"→ {room_name}: {old_target:.1f}°C → {new_target:.1f}°C ({action['reason']})")
 
         try:
             self.call_service("climate/set_temperature", entity_id=entity, temperature=new_target)
             self.last_action_time[room_name] = datetime.now()
+
+            # Set hysteresis direction AFTER successful execution
+            if action_direction:
+                self.room_action_direction[room_name] = action_direction
+
         except Exception as e:
             self.log(f"Fehler bei Action: {e}", level="ERROR")
 
