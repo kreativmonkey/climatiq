@@ -333,23 +333,81 @@ class ClimatIQController(hass.Hass):
         in_unstable, _ = self._check_unstable_zone_hysteresis(power)
         return in_unstable
 
+    def _load_policy_table(self) -> dict:
+        """Load learned policy table from YAML file."""
+        import yaml
+
+        policy_file = self.args.get("policy_file", "/config/appdaemon/apps/climatiq_policy.yaml")
+
+        if not os.path.exists(policy_file):
+            self.log(f"Policy file not found: {policy_file}", level="DEBUG")
+            return {}
+
+        try:
+            with open(policy_file, "r") as f:
+                policy = yaml.safe_load(f)
+            self.log(f"Loaded policy table from {policy_file}")
+            return policy
+        except Exception as e:
+            self.log(f"Error loading policy: {e}", level="WARNING")
+            return {}
+
+    def _get_policy_recommendation(self, state: Dict, policy: dict) -> Optional[dict]:
+        """Get policy recommendation for current conditions."""
+        if not policy:
+            return None
+
+        outdoor_temp = state.get("outdoor_temp", 15)
+        hour = datetime.now().hour
+
+        # Determine period
+        if 23 <= hour or hour < 6:
+            period = "night"
+        elif 6 <= hour < 10:
+            period = "morning"
+        elif 17 <= hour < 22:
+            period = "evening"
+        else:
+            period = "day"
+
+        # Determine mode (heating vs cooling)
+        mode = "heating" if outdoor_temp < 15 else "cooling"
+
+        # Find bucket
+        temp_bucket = round(outdoor_temp / 5) * 5
+        key = f"{temp_bucket}C_{period}"
+
+        policies = policy.get("policies", {}).get(mode, {})
+        recommendation = policies.get(key)
+
+        if recommendation:
+            self.log(
+                f"Policy match: {mode}/{key} → recommend {recommendation.get('best_rooms', '?')} rooms, "
+                f"expect {recommendation.get('expect_power', '?')}W"
+            )
+
+        return recommendation
+
     def _decide_stabilization_actions(self, state: Dict) -> List[Dict]:
         """Try to stabilize oscillating power consumption.
 
         Strategies tried sequentially:
-        1. Reduce targets on warm rooms (reduce fighting)
-        2. Turn off lowest priority room (remove load)
-        3. Increase targets (let rooms reach temp so units can idle)
+        1. Reduce targets on warm rooms (reduce fighting) - ANY warm room
+        2. Increase targets on cold rooms (let them reach temp so units can idle)
+        3. Turn off lowest priority warm room (if all else fails)
         """
         actions = []
         rules = self.rules
         rooms = state["rooms"]
 
+        # FIXED: Use comfort tolerance for "warm" definition (configurable)
+        # Don't require is_on - a warm room that's "off" can still have target lowered
+        warm_threshold = rules["comfort"]["temp_tolerance_warm"]  # Default 1.0K
+
         # Strategy 1: Reduce targets on WARM rooms (reduce fighting between units)
+        # ANY warm room qualifies (not just is_on=True)
         warm_rooms = [
-            (name, room)
-            for name, room in rooms.items()
-            if room.get("is_on", False) and room["delta"] > 0.5
+            (name, room) for name, room in rooms.items() if room["delta"] > warm_threshold
         ]
         warm_rooms.sort(key=lambda x: x[1]["delta"], reverse=True)  # warmest first
 
@@ -363,38 +421,20 @@ class ClimatIQController(hass.Hass):
                         "room": name,
                         "old_target": target,
                         "new_target": new_target,
-                        "reason": f"Stabilisierung: Reduziere {room['delta']:.1f}K zu warmer Raum",
+                        "reason": f"Stabilisierung: Reduziere {room['delta']:.1f}K (warm)",
                         "action_direction": ActionDirection.COOLING,
                     }
                 )
-                self.log(f"  → Strategie 1: Reduziere {name} Target {target}→{new_target}°C")
+                self.log(
+                    f"  → Strategie 1: Reduziere {name} Target {target}→{new_target}°C (war {room['delta']:.1f}K warm)"
+                )
                 return actions  # Execute one at a time, observe effect
 
-        # Strategy 2: Turn OFF lowest priority warm room
-        off_candidates = [
-            (name, room)
-            for name, room in rooms.items()
-            if room.get("is_on", False) and room["delta"] > 0.3
-        ]
-        if off_candidates:
-            # Sort by delta (warmest first = lowest priority)
-            off_candidates.sort(key=lambda x: x[1]["delta"], reverse=True)
-            name, room = off_candidates[0]
-            actions.append(
-                {
-                    "room": name,
-                    "action_type": "turn_off",
-                    "reason": f"Stabilisierung: Schalte aus ({room['delta']:.1f}K über Target)",
-                }
-            )
-            self.log(f"  → Strategie 2: Schalte {name} AUS (zu warm)")
-            return actions
+        # Strategy 2: Increase targets on COLD rooms (let them reach temp, then idle)
+        cold_threshold = rules["comfort"]["temp_tolerance_cold"]  # Default 1.5K
 
-        # Strategy 3: Increase targets on COLD rooms (let them reach temp, then idle)
         cold_rooms = [
-            (name, room)
-            for name, room in rooms.items()
-            if room.get("is_on", False) and room["delta"] < -1.0
+            (name, room) for name, room in rooms.items() if room["delta"] < -cold_threshold
         ]
         cold_rooms.sort(key=lambda x: x[1]["delta"])  # coldest first
 
@@ -412,10 +452,36 @@ class ClimatIQController(hass.Hass):
                         "action_direction": ActionDirection.HEATING,
                     }
                 )
-                self.log(f"  → Strategie 3: Erhöhe {name} Target {target}→{new_target}°C")
+                self.log(f"  → Strategie 2: Erhöhe {name} Target {target}→{new_target}°C")
                 return actions
 
-        self.log("  → Keine Stabilisierung möglich")
+        # Strategy 3: Turn OFF lowest priority warm room (only if is_on=True makes sense)
+        off_candidates = [
+            (name, room)
+            for name, room in rooms.items()
+            if room.get("is_on", False) and room["delta"] > 0.3
+        ]
+        if off_candidates:
+            off_candidates.sort(key=lambda x: x[1]["delta"], reverse=True)
+            name, room = off_candidates[0]
+            # Turn off = set target to minimum
+            target = room["target_temp"]
+            new_target = rules["adjustments"]["target_min"]
+            actions.append(
+                {
+                    "room": name,
+                    "old_target": target,
+                    "new_target": new_target,
+                    "reason": f"Stabilisierung: Deaktiviere {name} (zu warm)",
+                    "action_direction": ActionDirection.COOLING,
+                }
+            )
+            self.log(f"  → Strategie 3: Deaktiviere {name} (setze auf {new_target}°C)")
+            return actions
+
+        self.log(
+            f"  → Keine Stabilisierung möglich (warm: {len(warm_rooms)}, cold: {len(cold_rooms)})"
+        )
         return []
 
     def _check_unstable_zone_hysteresis(self, power: float) -> tuple[bool, str]:

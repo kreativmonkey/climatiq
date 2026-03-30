@@ -1,0 +1,289 @@
+#!/usr/bin/env python3
+"""
+Policy Learning Script - Hybrid RL for ClimatIQ Controller
+
+Analyzes historical logged episodes to build a policy table.
+Learns: "If outdoor_temp=X and time=Y → best settings = Z"
+
+Different policies for HEATING vs COOLING modes!
+"""
+
+import json
+import os
+from collections import defaultdict
+from datetime import datetime
+from pathlib import Path
+
+
+def load_episodes(log_file: str) -> list[dict]:
+    """Load episodes from JSONL log file."""
+    episodes = []
+    if not os.path.exists(log_file):
+        print(f"ERROR: Log file not found: {log_file}")
+        return episodes
+
+    with open(log_file, "r") as f:
+        for line in f:
+            try:
+                episodes.append(json.loads(line.strip()))
+            except json.JSONDecodeError:
+                continue
+
+    print(f"Loaded {len(episodes)} episodes")
+    return episodes
+
+
+def extract_features(episode: dict) -> dict:
+    """Extract features for policy learning."""
+    state = episode.get("state", {})
+    outdoor_temp = state.get("outdoor_temp", 0)
+    hour = episode.get("hour", 12)
+    is_night = episode.get("is_night", False)
+    is_morning = episode.get("is_morning", False)
+    is_evening = episode.get("is_evening", False)
+    power = state.get("power", 0)
+    rooms_on = state.get("rooms_on", 0)
+    total_delta = state.get("total_delta_abs", 0)
+    reward = episode.get("reward", {}).get("total", 0)
+
+    # Determine time period
+    if is_night:
+        period = "night"
+    elif is_morning:
+        period = "morning"
+    elif is_evening:
+        period = "evening"
+    else:
+        period = "day"
+
+    return {
+        "outdoor_temp": outdoor_temp,
+        "hour": hour,
+        "period": period,
+        "power": power,
+        "rooms_on": rooms_on,
+        "total_delta": total_delta,
+        "reward": reward,
+        "timestamp": episode.get("timestamp"),
+    }
+
+
+def build_policy_table(episodes: list[dict], mode: str = "heating") -> dict:
+    """Build policy table for given mode (heating/cooling).
+
+    Groups episodes by (outdoor_temp_bucket, period) and finds best actions.
+    """
+    # Temperature buckets (5°C intervals)
+    temp_buckets = defaultdict(list)
+
+    for ep in episodes:
+        features = extract_features(ep)
+
+        # Skip if not enough data
+        if features["rooms_on"] == 0:
+            continue
+
+        # Create bucket key
+        temp = features["outdoor_temp"]
+        period = features["period"]
+
+        # Round to bucket
+        bucket_temp = round(temp / 5) * 5
+
+        key = (bucket_temp, period)
+        temp_buckets[key].append(features)
+
+    # For each bucket, find optimal settings
+    policy = {}
+
+    for (temp, period), data in temp_buckets.items():
+        if len(data) < 5:  # Need minimum samples
+            continue
+
+        # Calculate average metrics
+        avg_power = sum(d["power"] for d in data) / len(data)
+        avg_delta = sum(d["total_delta"] for d in data) / len(data)
+        avg_reward = sum(d["reward"] for d in data) / len(data)
+        avg_rooms = sum(d["rooms_on"] for d in data) / len(data)
+
+        # Find best episodes (top 20% by reward)
+        sorted_data = sorted(data, key=lambda x: x["reward"], reverse=True)
+        best_count = max(1, len(sorted_data) // 5)
+        best_episodes = sorted_data[:best_count]
+
+        best_avg_rooms = sum(d["rooms_on"] for d in best_episodes) / len(best_episodes)
+
+        key_str = f"{temp}C_{period}"
+        policy[key_str] = {
+            "temp_range": f"{temp}-{temp + 5}C",
+            "period": period,
+            "samples": len(data),
+            "avg_power": round(avg_power),
+            "avg_delta": round(avg_delta, 2),
+            "avg_rooms": round(avg_rooms, 1),
+            "avg_reward": round(avg_reward, 2),
+            "best_rooms": round(best_avg_rooms, 1),
+            "recommendation": {
+                "target_rooms": round(best_avg_rooms),
+                "expect_power": round(avg_power),
+            },
+        }
+
+    return policy
+
+
+def analyze_optimal_conditions(episodes: list[dict]) -> dict:
+    """Analyze episodes to find optimal conditions for each mode."""
+    heating_eps = []
+    cooling_eps = []
+
+    for ep in episodes:
+        outdoor = ep.get("state", {}).get("outdoor_temp", 15)
+        if outdoor < 15:
+            heating_eps.append(ep)
+        else:
+            cooling_eps.append(ep)
+
+    print(f"\nHeating episodes (outdoor < 15°C): {len(heating_eps)}")
+    print(f"Cooling episodes (outdoor >= 15°C): {len(cooling_eps)}")
+
+    heating_policy = build_policy_table(heating_eps, "heating")
+    cooling_policy = build_policy_table(cooling_eps, "cooling")
+
+    return {
+        "heating": heating_policy,
+        "cooling": cooling_policy,
+    }
+
+
+def generate_policy_yaml(policies: dict, output_file: str):
+    """Generate policy YAML for controller."""
+    lines = [
+        "# Policy Table - Auto-generated by learn_policy.py",
+        "# DO NOT EDIT MANUALLY - will be overwritten",
+        "",
+        "# This maps (outdoor_temp, time_period) → optimal settings",
+        "# The controller will use these as guidelines, not hard rules",
+        "",
+        "policies:",
+    ]
+
+    for mode, policy in policies.items():
+        lines.append(f"  {mode}:")
+
+        for key, data in sorted(policy.items()):
+            lines.append(f"    {key}:")
+            lines.append(f'      temp_range: "{data["temp_range"]}"')
+            lines.append(f"      period: {data['period']}")
+            lines.append(f"      samples: {data['samples']}")
+            lines.append(f"      avg_power: {data['avg_power']}")
+            lines.append(f"      avg_delta: {data['avg_delta']}")
+            lines.append(f"      best_rooms: {data['best_rooms']}")
+            lines.append(f"      recommendation:")
+            lines.append(f"        target_rooms: {data['recommendation']['target_rooms']}")
+            lines.append(f"        expect_power: {data['recommendation']['expect_power']}")
+            lines.append("")
+
+    # Add rules section
+    lines.extend(
+        [
+            "# Fallback rules if policy not found",
+            "fallback_rules:",
+            "  heating:",
+            "    night: 2  # Keep 2 rooms on at night for stability",
+            "    morning: 3",
+            "    day: 2",
+            "    evening: 3",
+            "  cooling:",
+            "    night: 1",
+            "    morning: 2",
+            "    day: 1",
+            "    evening: 2",
+        ]
+    )
+
+    with open(output_file, "w") as f:
+        f.write("\n".join(lines))
+
+    print(f"\nPolicy YAML written to: {output_file}")
+
+
+def main():
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Learn policy from climatIQ logs")
+    parser.add_argument(
+        "--log-file",
+        "-l",
+        default="/config/appdaemon/logs/climatiq_rl.jsonl",
+        help="Path to RL log file",
+    )
+    parser.add_argument(
+        "--output", "-o", default="policy_table.yaml", help="Output policy YAML file"
+    )
+    parser.add_argument(
+        "--min-samples", "-m", default=5, type=int, help="Minimum samples per bucket"
+    )
+    args = parser.parse_args()
+
+    print("=" * 60)
+    print("ClimatIQ Policy Learning")
+    print("=" * 60)
+
+    # Load episodes
+    episodes = load_episodes(args.log_file)
+
+    if not episodes:
+        print("No episodes found. Run controller first!")
+        return
+
+    # Analyze
+    policies = analyze_optimal_conditions(episodes)
+
+    # Print summary
+    print("\n" + "=" * 60)
+    print("HEATING POLICY (outdoor < 15°C)")
+    print("=" * 60)
+
+    heating = policies.get("heating", {})
+    for key, data in sorted(heating.items()):
+        print(f"\n{key}:")
+        print(f"  Samples: {data['samples']}")
+        print(f"  Avg Power: {data['avg_power']}W")
+        print(f"  Avg Delta: {data['avg_delta']}K")
+        print(f"  Best Rooms: {data['best_rooms']}")
+
+    print("\n" + "=" * 60)
+    print("COOLING POLICY (outdoor >= 15°C)")
+    print("=" * 60)
+
+    cooling = policies.get("cooling", {})
+    for key, data in sorted(cooling.items()):
+        print(f"\n{key}:")
+        print(f"  Samples: {data['samples']}")
+        print(f"  Avg Power: {data['avg_power']}W")
+        print(f"  Avg Delta: {data['avg_delta']}K")
+        print(f"  Best Rooms: {data['best_rooms']}")
+
+    # Generate YAML
+    generate_policy_yaml(policies, args.output)
+
+    print("\n" + "=" * 60)
+    print("USAGE")
+    print("=" * 60)
+    print(f"""
+To use the learned policy:
+1. Copy {args.output} to your AppDaemon config
+2. Add 'policy_file' to your climatiq.yaml
+3. Controller will use policy as guidelines
+
+The policy tells you:
+- For each (outdoor_temp, time_period) combination
+- How many rooms should typically be ON
+- What power consumption to expect
+- What temperature deviation to expect
+""")
+
+
+if __name__ == "__main__":
+    main()
