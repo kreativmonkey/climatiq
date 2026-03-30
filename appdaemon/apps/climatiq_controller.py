@@ -118,27 +118,33 @@ class ClimatIQController(hass.Hass):
             self.log("Keine InfluxDB Config, nutze HA History", level="WARNING")
             return self._load_ha_history()
 
-        client = InfluxDBClient(
-            host=cfg.get("host", "localhost"),
-            port=cfg.get("port", 8086),
-            database=cfg.get("database", "homeassistant"),
-        )
+        try:
+            client = InfluxDBClient(
+                host=cfg.get("host", "localhost"),
+                port=cfg.get("port", 8086),
+                username=cfg.get("username"),
+                password=cfg.get("password"),
+                database=cfg.get("database", "homeassistant"),
+            )
 
-        # Letzte 30 Tage, 5min Auflösung
-        query = f"""
-            SELECT mean("value") as power
-            FROM "{cfg.get("measurement", "W")}"
-            WHERE "entity_id" = '{cfg.get("power_entity", "ac_current_energy")}'
-            AND time > now() - 30d
-            GROUP BY time(5m)
-            FILL(none)
-        """
+            # Letzte 30 Tage, 5min Auflösung
+            query = f"""
+                SELECT mean("value") as power
+                FROM "{cfg.get("measurement", "W")}"
+                WHERE "entity_id" = '{cfg.get("power_entity", "ac_current_energy")}'
+                AND time > now() - 30d
+                GROUP BY time(5m)
+                FILL(none)
+            """
 
-        result = client.query(query)
-        points = list(result.get_points())
+            result = client.query(query)
+            points = list(result.get_points())
 
-        self.log(f"InfluxDB: {len(points)} Datenpunkte geladen")
-        return points
+            self.log(f"InfluxDB: {len(points)} Datenpunkte geladen")
+            return points
+        except Exception as e:
+            self.log(f"InfluxDB Fehler: {e} - nutze HA History", level="WARNING")
+            return self._load_ha_history()
 
     def _load_ha_history(self) -> Optional[List[Dict]]:
         """Fallback: Lade History aus Home Assistant"""
@@ -652,6 +658,10 @@ class ClimatIQController(hass.Hass):
             target = room["target_temp"]
             step = rules["adjustments"]["target_step"]
             is_on = room.get("is_on", False)
+
+            # Only adjust targets for rooms that are ON
+            if not is_on:
+                continue
 
             # Temperature hysteresis check - prevents oscillation
             hyst_reverse = rules.get("hysteresis", {}).get("temp_hysteresis_reverse", 0.5)

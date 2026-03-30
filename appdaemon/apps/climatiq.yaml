@@ -20,6 +20,8 @@ climatiq_controller:
   influxdb:
     host: localhost
     port: 8086
+    username: your_username      # <- CHANGE THIS
+    password: your_password      # <- CHANGE THIS
     database: homeassistant
     measurement: W
     power_entity: ac_current_energy
