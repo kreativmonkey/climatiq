@@ -516,10 +516,12 @@ class ClimatIQController(hass.Hass):
                 if delta > hyst_reverse:
                     self.room_action_direction[name] = ActionDirection.NONE
                 else:
+                    # BLOCK opposite-direction action - room not warm enough yet
                     self.log(
                         f"⏳ {name}: Hysteresis active (heating, warte bis delta > +{hyst_reverse}K)",
                         level="DEBUG",
                     )
+                    continue  # Skip creating cooling action
 
             elif current_dir == ActionDirection.COOLING:
                 # After cooling, room must be cooler than target - hysteresis BEFORE heating
@@ -527,10 +529,12 @@ class ClimatIQController(hass.Hass):
                 if delta < -hyst_reverse:
                     self.room_action_direction[name] = ActionDirection.NONE
                 else:
+                    # BLOCK opposite-direction action - room not cool enough yet
                     self.log(
                         f"⏳ {name}: Hysteresis active (cooling, warte bis delta < -{hyst_reverse}K)",
                         level="DEBUG",
                     )
+                    continue  # Skip creating heating action
 
             # Zu kalt → Target erhöhen
             if delta < -rules["comfort"]["temp_tolerance_cold"]:

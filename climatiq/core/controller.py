@@ -172,7 +172,6 @@ class Controller:
         if self.is_night_mode() and is_unstable:
             action = self._strategy_night_mode(status, min_stable_power)
             if action.action_type != ActionType.NO_ACTION:
-                self._track_action_direction(action.target_unit, action)
                 self.stats["night_mode_actions"] += 1
                 return action
 
@@ -181,7 +180,6 @@ class Controller:
         if current_power < min_stable_power or is_unstable:
             action = self._strategy_stability_targeting(status, min_stable_power, power_std)
             if action.action_type != ActionType.NO_ACTION:
-                self._track_action_direction(action.target_unit, action)
                 self.stats["stability_actions"] += 1
                 return action
 
@@ -423,6 +421,8 @@ class Controller:
                 self._last_action_time = datetime.now(timezone.utc)
                 self._action_history.append(action)
                 self.stats["actions_taken"] += 1
+                # Track direction AFTER successful execution
+                self._track_action_direction(action.target_unit, action)
                 logger.info(f"Executed: {action.reason}")
 
             return ActionResult(
