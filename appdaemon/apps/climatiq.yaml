@@ -63,7 +63,9 @@ climatiq_controller:
       target_max: 24.0            # Maximum erlaubtes Target
     
     hysteresis:
-      min_action_interval_minutes: 15  # Cooldown pro Raum
+      min_action_interval_minutes: 15    # Cooldown pro Raum
+      temp_hysteresis_reverse: 0.5       # °C - Nach HEATING: Raum muss >Target+0.5K bevor wieder gekühlt
+      power_hysteresis_watts: 100        # Puffer um instabile Zonen (verhindert schnelle Wechsel)
     
     stability:
       max_actions_per_cycle: 2    # Max gleichzeitige Anpassungen

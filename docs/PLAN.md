@@ -442,6 +442,87 @@ Build a self-learning system that prevents power consumption cycling in multi-sp
 
 ---
 
+### Sprint 4.4: Stabilization Improvements v3.1 ⭐ CRITICAL FIXES (2026-03-30)
+
+**Goal**: Fix critical oscillation issues identified through production testing
+
+#### Problem Analysis (from user feedback)
+
+**User's Key Insight:**
+> "3 active units but power consumption was only idle power around 60W - none of the active devices needs heat. The problem is, that the system don't tell if a device is actually in idle or is heating."
+
+**Root Causes Identified:**
+1. **Hardcoded 500W threshold**: User's system minimum is ~300W, not 500W
+2. **False stability triggers**: 60W with 3 units ON = IDLE (correct!), but controller thinks "TOO LOW"
+3. **No heat demand inference**: Can't distinguish "idle" from "not enough heat"
+4. **No temperature hysteresis**: Target temperature oscillates up/down continuously
+
+**User's Observation:**
+- Reducing target temp → sometimes LESS power + WARMER rooms
+- This happens because fewer rooms fighting = less cycling = more efficient
+
+#### Implementation Tasks
+
+**4.4.1 Temperature Hysteresis** ✅ (for comfort holding)
+- [x] Add `ActionDirection` enum (HEATING/COOLING/NONE)
+- [x] Track action direction per room
+- [x] After HEATING, require room > target + hysteresis before cooling
+- [x] After COOLING, require room < target - hysteresis before heating
+- [x] Config: `temp_hysteresis_reverse: 0.5` (default)
+
+**4.4.2 Power Zone Hysteresis** ✅
+- [x] Add buffer around unstable zone boundaries
+- [x] Prevent rapid transitions into/out of zones
+- [x] Config: `power_hysteresis_watts: 100` (default)
+
+**4.4.3 Dynamic Stability Threshold** ⏳ (CRITICAL - NOT IMPLEMENTED CORRECTLY)
+- [ ] Replace hardcoded 500W with dynamic calculation
+- [ ] Formula: `250W * rooms_calling_for_heat`
+- [ ] Base on actual heat demand, not just "units ON"
+
+**4.4.4 Heat Demand Inference** ⏳ (CRITICAL - NOT IMPLEMENTED CORRECTLY)
+- [ ] Infer from temperature delta:
+  - `delta >= -0.5°C` → unit is IDLE (room satisfied)
+  - `delta < -0.5°C` → unit is calling for heat
+- [ ] New logic:
+  - If NO rooms need heat → LOW POWER IS NORMAL (do nothing!)
+  - If rooms need heat AND power is low → REAL PROBLEM (intervene)
+
+**4.4.5 Stability Action Logic** ⏳
+- [ ] Current: Only turns rooms ON for stability
+- [ ] Needed: Sometimes turning OFF stabilizes (user's observation!)
+- [ ] Allow marking rooms as "can turn off for stability" with priority
+
+#### Test Scenarios
+
+**Scenario A: Nighttime Idle**
+- Input: 3 units ON, 60W power, all rooms at target temp
+- Expected: No action (idle is correct)
+- Previous bug: Would try to turn on more rooms ❌
+
+**Scenario B: Real Stability Issue**  
+- Input: 2 rooms need heat, power = 150W
+- Expected: Turn on more rooms ✅
+- Previous bug: Would not trigger (threshold too high) ❌
+
+**Scenario C: Comfort Holding**
+- Room: 21.5°C → target 22°C → heat → target 22.5°C → room 23°C
+- Expected: No cooling until room drops below 22°C ✅
+- Previous bug: Would immediately start cooling ❌
+
+#### Files to Modify
+- `appdaemon/apps/climatiq_controller.py` - Main controller
+- `appdaemon/apps/climatiq.yaml` - Configuration
+- `climatiq/core/controller.py` - Offline testing
+
+#### Success Criteria
+- [ ] System logs show distinction between "idle" and "needs heat"
+- [ ] No false stability triggers during nighttime idle
+- [ ] Temperature hysteresis prevents continuous target adjustment
+- [ ] Dynamic threshold adjusts to actual system state
+
+---
+
 ## Open Questions
 
 1. **Optimal window size for variance calculation?**  
