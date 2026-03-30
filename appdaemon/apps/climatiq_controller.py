@@ -679,33 +679,77 @@ class ClimatIQController(hass.Hass):
             self.log(f"Fehler bei Action: {e}", level="ERROR")
 
     def calculate_reward(self, state: Dict, in_unstable: bool = False) -> Dict:
-        """Berechnet Reward für RL Training"""
+        """Berechnet Reward für RL Training / Policy Learning
 
-        # Comfort: Nähe zu Soll-Temps
+        Goal: Find optimal settings for each condition:
+        - outdoor_temp + time → best settings → minimum power while stable
+        """
+
+        # Comfort: Nähe zu Soll-Temps (higher is better, closer to 0 = better)
         comfort = -state["total_delta_abs"]
 
-        # Stability Penalty
-        stability = -20 if in_unstable else 0
+        # Stability: Power variance matters more than absolute value
+        # Use recent power history if available
+        power_variance = self._get_recent_power_variance()
+        stability = -10 if in_unstable else 0
+        if power_variance is not None:
+            stability -= min(power_variance / 50, 10)  # Penalty for variance
 
-        # Energy: Geringerer Verbrauch = besser
+        # Energy Efficiency: Lower power is better, but NOT at cost of comfort
+        # Key insight: We want MINIMUM STABLE power
         energy = -(state["power"] / 500)
 
+        # Combined reward (weighted)
         total = comfort + stability + energy
 
-        return {"total": total, "comfort": comfort, "stability": stability, "energy": energy}
+        return {
+            "total": total,
+            "comfort": comfort,
+            "stability": stability,
+            "energy": energy,
+            "power_variance": power_variance,
+        }
+
+    def _get_recent_power_variance(self) -> Optional[float]:
+        """Calculate power variance from recent history for stability metric."""
+        # Could query InfluxDB for last 15 min power variance
+        # For now, return None (simpler)
+        return None
 
     def log_episode(self, state: Dict, actions: List[Dict], reward: Dict):
-        """Loggt Episode für RL Training (JSONL)"""
+        """Loggt Episode für RL / Policy Learning (JSONL)
+
+        Enhanced logging for building policy table:
+        - outdoor_temp + time → best actions
+        - We'll analyze this later to extract: "If temp=X, time=Y → do Z"
+        """
+        from datetime import datetime
 
         log_file = self.args.get("log_file", "/config/appdaemon/logs/climatiq_rl.jsonl")
 
+        # Extract time features for policy learning
+        try:
+            dt = datetime.fromisoformat(state["timestamp"])
+            hour = dt.hour
+            is_night = 23 <= hour or hour < 6
+            is_morning = 6 <= hour < 10
+            is_evening = 17 <= hour < 22
+        except:
+            hour = 0
+            is_night = is_morning = is_evening = False
+
         episode = {
             "timestamp": state["timestamp"],
+            "hour": hour,
+            "is_night": is_night,
+            "is_morning": is_morning,
+            "is_evening": is_evening,
             "state": {
                 "power": state["power"],
                 "outdoor_temp": state["outdoor_temp"],
                 "total_delta_abs": state["total_delta_abs"],
                 "rooms": {k: v["delta"] for k, v in state["rooms"].items()},
+                "rooms_on": sum(1 for r in state["rooms"].values() if r.get("is_on", False)),
             },
             "actions": actions,
             "reward": reward,
