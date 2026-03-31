@@ -660,9 +660,10 @@ class ClimatIQController(hass.Hass):
 
         actions = []
         rules = self.rules
+        auto_turn_on = rules.get("stability", {}).get("auto_turn_on", False)
+        cold_threshold = rules["comfort"]["temp_tolerance_cold"]
 
         for name, room in state["rooms"].items():
-            # Cooldown prüfen
             last = self.last_action_time.get(name, datetime.min)
             cooldown = timedelta(minutes=rules["hysteresis"]["min_action_interval_minutes"])
             if (datetime.now() - last) < cooldown:
@@ -673,8 +674,19 @@ class ClimatIQController(hass.Hass):
             step = rules["adjustments"]["target_step"]
             is_on = room.get("is_on", False)
 
-            # Only adjust targets for rooms that are ON
             if not is_on:
+                if auto_turn_on and delta < -cold_threshold:
+                    self.log(f"⚡ {name}: OFF but zu kalt ({delta:.1f}K) - schalte ein")
+                    actions.append(
+                        {
+                            "room": name,
+                            "old_target": target,
+                            "new_target": target,
+                            "hvac_mode": "heat",
+                            "reason": f"Zu kalt ({delta:.1f}K), schalte ein",
+                            "action_direction": ActionDirection.HEATING,
+                        }
+                    )
                 continue
 
             # Temperature hysteresis check - prevents oscillation
@@ -764,6 +776,8 @@ class ClimatIQController(hass.Hass):
         try:
             if hvac_mode == "off":
                 self.call_service("climate/set_hvac_mode", entity_id=entity, hvac_mode="off")
+            elif hvac_mode in ["heat", "cool"]:
+                self.call_service("climate/set_hvac_mode", entity_id=entity, hvac_mode=hvac_mode)
             else:
                 current_state = self.get_current_state()
                 if current_state is None:
