@@ -44,3 +44,13 @@ Nach dem Start siehst du im Log:
   Instabile Zonen: 1
     - 1000W - 1500W
 ```
+
+## Stabilisierung
+
+Wenn die Power oszilliert (in instabiler Zone), versucht der Controller:
+
+1. **Target senken** bei warmen Räumen (die wärmsten zuerst)
+2. **Target erhöhen** bei kalten Räumen (damit sie Idle erreichen)
+3. **Abschalten** als letzten Ausweg (HVAC-Mode → off)
+
+Der Controller merkt sich den letzten angepassten Raum und wechselt beim nächsten Mal, um nicht immer denselben Raum zu adjustieren.
