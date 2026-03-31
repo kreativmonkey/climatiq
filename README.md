@@ -8,6 +8,10 @@ ClimatIQ analysiert das Verhalten deiner Wärmepumpe und optimiert automatisch d
 
 - 🔍 **Automatische Zonen-Erkennung**: Lernt stabile/instabile Betriebszonen aus InfluxDB-Historie (GMM Clustering)
 - 🎯 **Intelligente Regelung**: Passt Soll-Temperaturen an statt On/Off-Schaltungen
+- 🔄 **Stabilisierung**: Erkennt Oszillation und reagiert mit Target-Anpassung oder Abschalten
+- 🔌 **Echtes Ausschalten**: Setzt HVAC-Mode auf "off" statt nur Target-Temperatur zu senken
+- 🔁 **Round-Robin Auswahl**: Vermeidet, immer denselben Raum anzupassen
+- 🔀 **Optionaler HVAC-Sync**: Synchronisiert HVAC-Modus beim Ein-/Ausschalten mit anderen aktiven Geräten
 - 📊 **ML-basierte Analyse**: Erkennt Cycling-Muster und deren Ursachen
 - 🤖 **RL-Ready**: Loggt State-Action-Reward für zukünftiges Reinforcement Learning
 - 🏠 **Home Assistant Integration**: Läuft als AppDaemon App
@@ -69,9 +73,10 @@ Diese Zonen werden täglich neu gelernt - keine manuelle Konfiguration nötig!
 
 ### Regelstrategie
 
-1. **Primär**: Soll-Temperatur-Anpassung (±0.5°C Schritte)
-2. **Sekundär**: Vermeidung instabiler Power-Zonen
-3. **Constraints**: Hysterese (15min Cooldown), max 2 Actions pro Cycle
+1. **Stabilisierung**: Wenn Power oszilliert → senke warme Räume, erhöhe kalte, oder schalte ab
+2. **Komfort**: Halte Raumtemperaturen im Toleranzbereich (±1.0K warm, ±1.5K kalt)
+3. **Target-Anpassung**: ±0.5°C Schritte pro Cycle
+4. **Constraints**: Hysterese (15min Cooldown), max 2 Actions pro Cycle
 
 ### RL Logging
 
@@ -85,6 +90,26 @@ Jeder Control-Cycle wird geloggt:
 ```
 
 Diese Daten können später für Reinforcement Learning verwendet werden.
+
+### Konfiguration
+
+In `climatiq.yaml`:
+
+```yaml
+rules:
+  comfort:
+    temp_tolerance_cold: 1.5    # Unter -1.5K vom Target → Action
+    temp_tolerance_warm: 1.0    # Über +1.0K vom Target → Action
+  
+  adjustments:
+    target_step: 0.5            # Schrittweite pro Anpassung (°C)
+    target_min: 16.0            # Minimum erlaubtes Target
+    target_max: 24.0            # Maximum erlaubtes Target
+  
+  stability:
+    max_actions_per_cycle: 2     # Max gleichzeitige Anpassungen
+    sync_hvac_mode_on: true     # HVAC-Modus synchronisieren beim Ein/Aus
+```
 
 ## Dokumentation
 
