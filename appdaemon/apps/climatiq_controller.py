@@ -37,30 +37,23 @@ class ClimatIQController(hass.Hass):
         self.sensors = self.args.get("sensors", {})
         self.rules = self.args.get("rules", {})
         self.influx_config = self.args.get("influxdb", {})
+        self.default_target_temp = self.args.get("default_target_temp", 20.0)
 
         self.last_action_time = {}
         self.unstable_zones = []
         self.stable_zones = []
 
-        # Temperature hysteresis: prevents oscillation in comfort holding
         self.room_action_direction: Dict[str, ActionDirection] = {}
-
-        # Power zone hysteresis: prevents rapid zone transitions
         self.power_hysteresis_state: Optional[str] = None
-
-        # Track last room acted upon to avoid always picking the same one
         self.last_stabilization_room: Optional[str] = None
 
-        # 1. Automatische Zonen-Erkennung beim Start
         self.log("=== ClimatIQ Controller V3.1 ===")
         self.log("Starte automatische Zonen-Erkennung...")
         self.detect_zones_from_history()
 
-        # 2. Control Cycle starten
         interval = self.args.get("interval_minutes", 5)
         self.run_every(self.control_cycle, datetime.now() + timedelta(seconds=30), interval * 60)
 
-        # 3. Zonen täglich neu lernen (03:00 Uhr)
         self.run_daily(self.detect_zones_from_history, "03:00:00")
 
         self.log(
@@ -627,18 +620,25 @@ class ClimatIQController(hass.Hass):
             rooms = {}
             for name, cfg in self.rooms.items():
                 curr = self.get_state(cfg["temp_sensor"])
-                targ = self.get_state(cfg["climate_entity"], attribute="temperature")
+                target_cfg = cfg.get("target_temp", self.default_target_temp)
                 hvac_mode = self.get_state(cfg["climate_entity"])
 
                 if curr in ["unknown", "unavailable", None]:
                     continue
-                if targ in ["unknown", "unavailable", None]:
-                    continue
+
+                if isinstance(target_cfg, str):
+                    targ = self.get_state(target_cfg)
+                    if targ in ["unknown", "unavailable", None]:
+                        targ = self.default_target_temp
+                    else:
+                        targ = float(targ)
+                else:
+                    targ = float(target_cfg)
 
                 rooms[name] = {
                     "current_temp": float(curr),
-                    "target_temp": float(targ),
-                    "delta": float(curr) - float(targ),
+                    "target_temp": targ,
+                    "delta": float(curr) - targ,
                     "hvac_mode": hvac_mode,
                     "is_on": hvac_mode not in ["off", "unknown", "unavailable"],
                 }

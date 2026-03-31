@@ -36,22 +36,29 @@ climatiq_controller:
     erdgeschoss:
       temp_sensor: sensor.temperatur_wohnzimmer
       climate_entity: climate.panasonic_climate_erdgeschoss
+      target_temp: 21.0
     
     schlafzimmer:
       temp_sensor: sensor.temperatur_flur_og
       climate_entity: climate.panasonic_climate_schlafzimmer
+      target_temp: 18.0
     
     arbeitszimmer:
       temp_sensor: sensor.rwm_arbeitszimmer_temperature
       climate_entity: climate.panasonic_climate_arbeitszimmer
+      target_temp: 20.0
     
     kinderzimmer:
       temp_sensor: sensor.0x000d6f0019c90b85_temperature
       climate_entity: climate.panasonic_climate_kinderzimmer
+      target_temp: 20.0
     
     ankleide:
       temp_sensor: sensor.temperatur_flur_og
       climate_entity: climate.panasonic_climate_ankleide
+      target_temp: 18.0
+  
+  default_target_temp: 20.0
   
   # Regeln (KEINE instabilen Zonen - werden automatisch erkannt!)
   rules:
