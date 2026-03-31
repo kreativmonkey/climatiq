@@ -2,12 +2,13 @@
 ClimatIQ Controller V3.1 - AppDaemon Integration
 
 Features:
-- AUTOMATISCHE Zonen-Erkennung beim Start (GMM Clustering)
-- Target-Anpassung als Hauptstrategie
+- Automatic zone detection at startup (GMM Clustering)
+- Target temperature adjustment as primary strategy
 - RL Logging (State-Action-Reward)
 - Temperature Hysteresis: Prevents oscillation in comfort holding
 - Power Zone Hysteresis: Prevents rapid zone transitions
 - Heat Demand Inference: Knows the difference between idle and not-enough-heat
+- Auto turn on/off rooms based on configuration
 """
 
 import appdaemon.plugins.hass.hassapi as hass
@@ -28,10 +29,10 @@ class ActionDirection(str, Enum):
 
 
 class ClimatIQController(hass.Hass):
-    """Intelligenter Wärmepumpen-Controller mit automatischer Zonen-Erkennung"""
+    """Heat pump controller with automatic zone detection."""
 
     def initialize(self):
-        """AppDaemon Initialisierung"""
+        """Initialize the controller and start control cycle."""
 
         self.rooms = self.args.get("rooms", {})
         self.sensors = self.args.get("sensors", {})
@@ -61,18 +62,15 @@ class ClimatIQController(hass.Hass):
         )
 
     # =========================================================================
-    # AUTOMATISCHE ZONEN-ERKENNUNG
+    # AUTOMATIC ZONE DETECTION
     # =========================================================================
 
     def detect_zones_from_history(self, kwargs=None):
-        """
-        Lernt stabile/instabile Zonen aus InfluxDB Historie.
-        Nutzt GMM (Gaussian Mixture Model) Clustering.
-        """
+        """Learn stable/unstable zones from InfluxDB history using GMM clustering."""
         self.log("Lade historische Daten für Zonen-Erkennung...")
 
         try:
-            # Versuche InfluxDB Daten zu laden
+            # Try to load InfluxDB data
             data = self._load_influx_history()
 
             if data is None or len(data) < 1000:
@@ -104,7 +102,7 @@ class ClimatIQController(hass.Hass):
             self._use_fallback_zones()
 
     def _load_influx_history(self) -> Optional[List[Dict]]:
-        """Lädt Power-Historie aus InfluxDB"""
+        """Load power history from InfluxDB."""
 
         # InfluxDB v1 Query
         from influxdb import InfluxDBClient
@@ -143,7 +141,7 @@ class ClimatIQController(hass.Hass):
             return self._load_ha_history()
 
     def _load_ha_history(self) -> Optional[List[Dict]]:
-        """Fallback: Lade History aus Home Assistant"""
+        """Fallback: Load history from Home Assistant."""
 
         # HA History API (letzte 7 Tage max)
         end = datetime.now()
@@ -257,7 +255,7 @@ class ClimatIQController(hass.Hass):
         return {"stable": stable_zones, "unstable": unstable_zones}
 
     def _use_fallback_zones(self):
-        """Fallback wenn keine Daten verfügbar"""
+        """Fallback when no data is available."""
         self.log("Nutze Fallback-Zonen (aus 90-Tage Analyse)", level="WARNING")
         self.unstable_zones = [{"min": 1000, "max": 1500, "reason": "fallback"}]
         self.stable_zones = [
@@ -266,7 +264,7 @@ class ClimatIQController(hass.Hass):
         ]
 
     def _save_zones_cache(self):
-        """Speichert erkannte Zonen in Cache-Datei"""
+        """Save detected zones to cache file."""
         cache_path = "/config/addon_configs/a0d7b954_appdaemon/climatiq_zones_cache.json"
         cache = {
             "timestamp": datetime.now().isoformat(),
@@ -285,7 +283,7 @@ class ClimatIQController(hass.Hass):
     # =========================================================================
 
     def control_cycle(self, kwargs):
-        """Hauptschleife - wird alle N Minuten ausgeführt"""
+        """Main control loop - runs every N minutes."""
 
         self.log("--- Control Cycle ---")
 
@@ -331,7 +329,7 @@ class ClimatIQController(hass.Hass):
             self.log(f"Fehler: {e}", level="ERROR")
 
     def _is_in_unstable_zone(self, power: float) -> bool:
-        """Prüft ob aktuelle Power in instabiler Zone liegt"""
+        """Check if current power is in an unstable zone."""
         in_unstable, _ = self._check_unstable_zone_hysteresis(power)
         return in_unstable
 
@@ -603,7 +601,7 @@ class ClimatIQController(hass.Hass):
         return False
 
     def get_current_state(self) -> Optional[Dict]:
-        """Liest aktuellen Zustand aus Home Assistant"""
+        """Get current state from Home Assistant."""
 
         try:
             power_state = self.get_state(self.sensors["power"])
@@ -656,7 +654,7 @@ class ClimatIQController(hass.Hass):
             return None
 
     def decide_actions(self, state: Dict) -> List[Dict]:
-        """Entscheidet welche Target-Anpassungen nötig sind"""
+        """Decide which target temperature adjustments are needed."""
 
         actions = []
         rules = self.rules
@@ -759,7 +757,7 @@ class ClimatIQController(hass.Hass):
         return actions
 
     def execute_action(self, action: Dict):
-        """Führt Target-Anpassung in Home Assistant aus"""
+        """Execute target temperature adjustment in Home Assistant."""
 
         room_name = action["room"]
         new_target = action["new_target"]
@@ -815,24 +813,22 @@ class ClimatIQController(hass.Hass):
         return modes[0]
 
     def calculate_reward(self, state: Dict, in_unstable: bool = False) -> Dict:
-        """Berechnet Reward für RL Training / Policy Learning
+        """Calculate reward for RL training / policy learning.
 
         Goal: Find optimal settings for each condition:
         - outdoor_temp + time → best settings → minimum power while stable
         """
 
-        # Comfort: Nähe zu Soll-Temps (higher is better, closer to 0 = better)
+        # Comfort: Distance from target temps (closer to 0 = better)
         comfort = -state["total_delta_abs"]
 
         # Stability: Power variance matters more than absolute value
-        # Use recent power history if available
         power_variance = self._get_recent_power_variance()
         stability = -10 if in_unstable else 0
         if power_variance is not None:
-            stability -= min(power_variance / 50, 10)  # Penalty for variance
+            stability -= min(power_variance / 50, 10)
 
         # Energy Efficiency: Lower power is better, but NOT at cost of comfort
-        # Key insight: We want MINIMUM STABLE power
         energy = -(state["power"] / 500)
 
         # Combined reward (weighted)
@@ -853,7 +849,7 @@ class ClimatIQController(hass.Hass):
         return None
 
     def log_episode(self, state: Dict, actions: List[Dict], reward: Dict):
-        """Loggt Episode für RL / Policy Learning (JSONL)
+        """Log episode for RL / policy learning (JSONL).
 
         Enhanced logging for building policy table:
         - outdoor_temp + time → best actions

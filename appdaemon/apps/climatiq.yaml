@@ -1,22 +1,22 @@
 # ClimatIQ Controller V3.1 - AppDaemon Configuration
 #
-# AUTOMATISCHE ZONEN-ERKENNUNG: 
-# Der Controller lernt beim Start (und täglich um 03:00) automatisch
-# welche Power-Bereiche stabil/instabil sind via GMM Clustering.
-# Du musst KEINE Zonen manuell konfigurieren!
+# Auto zone detection:
+# The controller learns stable/unstable power zones at startup
+# (and daily at 03:00) using GMM clustering.
+# No manual zone configuration needed!
 
 climatiq_controller:
   module: climatiq_controller
   class: ClimatIQController
-  
-  # Interval (Minuten)
+
+  # Control cycle interval in minutes
   interval_minutes: 5
-  
-  # Log file für RL Training
+
+  # Log file for RL training
   log_file: /config/addon_configs/a0d7b954_appdaemon/climatiq_rl.jsonl
-  
-  # InfluxDB für historische Daten (Zonen-Erkennung)
-  # Falls nicht konfiguriert: nutzt HA History (nur 7 Tage)
+
+  # InfluxDB for historical data (zone detection)
+  # If not configured: uses HA History (max 7 days)
   influxdb:
     host: localhost
     port: 8086
@@ -25,58 +25,64 @@ climatiq_controller:
     database: homeassistant
     measurement: W
     power_entity: ac_current_energy
-  
-  # Sensoren
+
+  # Sensors
   sensors:
     power: sensor.ac_current_energy
     outdoor_temp: sensor.ac_temperatur_outdoor
-  
-  # Räume
+
+  # Rooms configuration
+  # Each room can have:
+  #   - temp_sensor: temperature sensor entity
+  #   - climate_entity: climate device entity
+  #   - target_temp: desired temperature (number or entity)
   rooms:
     erdgeschoss:
       temp_sensor: sensor.temperatur_wohnzimmer
       climate_entity: climate.panasonic_climate_erdgeschoss
       target_temp: 21.0
-    
+
     schlafzimmer:
       temp_sensor: sensor.temperatur_flur_og
       climate_entity: climate.panasonic_climate_schlafzimmer
       target_temp: 18.0
-    
+
     arbeitszimmer:
       temp_sensor: sensor.rwm_arbeitszimmer_temperature
       climate_entity: climate.panasonic_climate_arbeitszimmer
       target_temp: 20.0
-    
+
     kinderzimmer:
       temp_sensor: sensor.0x000d6f0019c90b85_temperature
       climate_entity: climate.panasonic_climate_kinderzimmer
       target_temp: 20.0
-    
+
     ankleide:
       temp_sensor: sensor.temperatur_flur_og
       climate_entity: climate.panasonic_climate_ankleide
       target_temp: 18.0
-  
+
+  # Default target temperature for rooms without explicit target_temp
   default_target_temp: 20.0
-  
-  # Regeln (KEINE instabilen Zonen - werden automatisch erkannt!)
+
+  # Rules
   rules:
     comfort:
-      temp_tolerance_cold: 1.5    # Unter -1.5K vom Target → Action
-      temp_tolerance_warm: 1.0    # Über +1.0K vom Target → Action
-    
+      # Action threshold: delta from target temp to trigger adjustment
+      temp_tolerance_cold: 1.5    # Action when room is 1.5K below target
+      temp_tolerance_warm: 1.0    # Action when room is 1.0K above target
+
     adjustments:
-      target_step: 0.5            # Schrittweite pro Anpassung (°C)
-      target_min: 16.0            # Minimum erlaubtes Target
-      target_max: 24.0            # Maximum erlaubtes Target
-    
+      target_step: 0.5            # Temperature step per adjustment (°C)
+      target_min: 16.0            # Minimum allowed target temperature
+      target_max: 24.0            # Maximum allowed target temperature
+
     hysteresis:
-      min_action_interval_minutes: 15    # Cooldown pro Raum
-      temp_hysteresis_reverse: 0.5       # °C - Nach HEATING: Raum muss >Target+0.5K bevor wieder gekühlt
-      power_hysteresis_watts: 100        # Puffer um instabile Zonen (verhindert schnelle Wechsel)
-    
+      min_action_interval_minutes: 15    # Cooldown between actions per room
+      temp_hysteresis_reverse: 0.5       # After heating: room must be >target+0.5K before cooling
+      power_hysteresis_watts: 100        # Buffer around unstable zones
+
     stability:
       max_actions_per_cycle: 2
-      auto_turn_off: true
-      auto_turn_on: false
+      auto_turn_off: true      # Allow algorithm to turn OFF rooms
+      auto_turn_on: false      # Allow algorithm to turn ON rooms
