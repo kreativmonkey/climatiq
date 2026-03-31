@@ -70,5 +70,5 @@ climatiq_controller:
       power_hysteresis_watts: 100        # Puffer um instabile Zonen (verhindert schnelle Wechsel)
     
     stability:
-      max_actions_per_cycle: 2    # Max gleichzeitige Anpassungen
-      # KEINE unstable_power_min/max mehr - wird automatisch erkannt!
+      max_actions_per_cycle: 2
+      sync_hvac_mode_on: true

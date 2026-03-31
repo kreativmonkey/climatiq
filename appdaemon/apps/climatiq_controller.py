@@ -48,6 +48,9 @@ class ClimatIQController(hass.Hass):
         # Power zone hysteresis: prevents rapid zone transitions
         self.power_hysteresis_state: Optional[str] = None
 
+        # Track last room acted upon to avoid always picking the same one
+        self.last_stabilization_room: Optional[str] = None
+
         # 1. Automatische Zonen-Erkennung beim Start
         self.log("=== ClimatIQ Controller V3.1 ===")
         self.log("Starte automatische Zonen-Erkennung...")
@@ -397,33 +400,29 @@ class ClimatIQController(hass.Hass):
         return recommendation
 
     def _decide_stabilization_actions(self, state: Dict) -> List[Dict]:
-        """Try to stabilize oscillating power consumption.
-
-        Strategies tried sequentially:
-        1. Reduce targets on warm rooms (reduce fighting) - ANY warm room
-        2. Increase targets on cold rooms (let them reach temp so units can idle)
-        3. Turn off lowest priority warm room (if all else fails)
-        """
         actions = []
         rules = self.rules
         rooms = state["rooms"]
 
-        # FIXED: Use comfort tolerance for "warm" definition (configurable)
-        # Don't require is_on - a warm room that's "off" can still have target lowered
-        warm_threshold = rules["comfort"]["temp_tolerance_warm"]  # Default 1.0K
+        warm_threshold = rules["comfort"]["temp_tolerance_warm"]
+        target_min = rules["adjustments"]["target_min"]
 
-        # Strategy 1: Reduce targets on WARM rooms (reduce fighting between units)
-        # ANY warm room qualifies (not just is_on=True)
         warm_rooms = [
-            (name, room) for name, room in rooms.items() if room["delta"] > warm_threshold
+            (name, room)
+            for name, room in rooms.items()
+            if room["delta"] > warm_threshold and room["target_temp"] > target_min
         ]
-        warm_rooms.sort(key=lambda x: x[1]["delta"], reverse=True)  # warmest first
+        warm_rooms.sort(key=lambda x: x[1]["delta"], reverse=True)
 
-        for name, room in warm_rooms[:1]:  # Try 1 room
+        if self.last_stabilization_room and len(warm_rooms) > 1:
+            warm_rooms = [(n, r) for n, r in warm_rooms if n != self.last_stabilization_room]
+
+        for name, room in warm_rooms[:1]:
             target = room["target_temp"]
             step = rules["adjustments"]["target_step"]
-            new_target = max(target - step, rules["adjustments"]["target_min"])
+            new_target = max(target - step, target_min)
             if new_target != target:
+                self.last_stabilization_room = name
                 actions.append(
                     {
                         "room": name,
@@ -436,21 +435,25 @@ class ClimatIQController(hass.Hass):
                 self.log(
                     f"  → Strategie 1: Reduziere {name} Target {target}→{new_target}°C (war {room['delta']:.1f}K warm)"
                 )
-                return actions  # Execute one at a time, observe effect
+                return actions
 
-        # Strategy 2: Increase targets on COLD rooms (let them reach temp, then idle)
-        cold_threshold = rules["comfort"]["temp_tolerance_cold"]  # Default 1.5K
+        cold_threshold = rules["comfort"]["temp_tolerance_cold"]
+        target_max = rules["adjustments"]["target_max"]
 
         cold_rooms = [
             (name, room) for name, room in rooms.items() if room["delta"] < -cold_threshold
         ]
-        cold_rooms.sort(key=lambda x: x[1]["delta"])  # coldest first
+        cold_rooms.sort(key=lambda x: x[1]["delta"])
+
+        if self.last_stabilization_room and len(cold_rooms) > 1:
+            cold_rooms = [(n, r) for n, r in cold_rooms if n != self.last_stabilization_room]
 
         for name, room in cold_rooms[:1]:
             target = room["target_temp"]
             step = rules["adjustments"]["target_step"]
-            new_target = min(target + step, rules["adjustments"]["target_max"])
+            new_target = min(target + step, target_max)
             if new_target != target:
+                self.last_stabilization_room = name
                 actions.append(
                     {
                         "room": name,
@@ -463,28 +466,34 @@ class ClimatIQController(hass.Hass):
                 self.log(f"  → Strategie 2: Erhöhe {name} Target {target}→{new_target}°C")
                 return actions
 
-        # Strategy 3: Turn OFF lowest priority warm room (only if is_on=True makes sense)
         off_candidates = [
             (name, room)
             for name, room in rooms.items()
-            if room.get("is_on", False) and room["delta"] > 0.3
+            if room.get("is_on", False) and room["delta"] > 0.3 and room["target_temp"] > target_min
         ]
+        off_candidates.sort(key=lambda x: x[1]["delta"], reverse=True)
+
+        if self.last_stabilization_room and len(off_candidates) > 1:
+            off_candidates = [
+                (n, r) for n, r in off_candidates if n != self.last_stabilization_room
+            ]
+
         if off_candidates:
-            off_candidates.sort(key=lambda x: x[1]["delta"], reverse=True)
             name, room = off_candidates[0]
-            # Turn off = set target to minimum
             target = room["target_temp"]
-            new_target = rules["adjustments"]["target_min"]
+            new_target = target_min
+            self.last_stabilization_room = name
             actions.append(
                 {
                     "room": name,
                     "old_target": target,
                     "new_target": new_target,
+                    "hvac_mode": "off",
                     "reason": f"Stabilisierung: Deaktiviere {name} (zu warm)",
                     "action_direction": ActionDirection.COOLING,
                 }
             )
-            self.log(f"  → Strategie 3: Deaktiviere {name} (setze auf {new_target}°C)")
+            self.log(f"  → Strategie 3: Deaktiviere {name} (hvac_mode=off)")
             return actions
 
         self.log(
@@ -742,19 +751,53 @@ class ClimatIQController(hass.Hass):
         old_target = action["old_target"]
         entity = self.rooms[room_name]["climate_entity"]
         action_direction = action.get("action_direction")
+        hvac_mode = action.get("hvac_mode")
+
+        if hvac_mode == "off":
+            self.log(f"→ {room_name}: {old_target:.1f}°C → OFF")
 
         self.log(f"→ {room_name}: {old_target:.1f}°C → {new_target:.1f}°C ({action['reason']})")
 
         try:
+            if hvac_mode == "off":
+                self.call_service("climate/set_hvac_mode", entity_id=entity, hvac_mode="off")
+
+            sync_hvac = self.rules.get("stability", {}).get("sync_hvac_mode_on", False)
+            if sync_hvac and hvac_mode != "off":
+                current_state = self.get_current_state()
+                if current_state is None:
+                    current_state = {"rooms": {}}
+                current_room = current_state["rooms"].get(room_name, {})
+                if current_room.get("hvac_mode") in ["off", "unknown", "unavailable", None]:
+                    common_mode = self._get_common_hvac_mode()
+                    if common_mode and common_mode != "off":
+                        self.log(f"  → Sync HVAC mode to {common_mode} (other devices)")
+                        self.call_service(
+                            "climate/set_hvac_mode", entity_id=entity, hvac_mode=common_mode
+                        )
+
             self.call_service("climate/set_temperature", entity_id=entity, temperature=new_target)
             self.last_action_time[room_name] = datetime.now()
 
-            # Set hysteresis direction AFTER successful execution
             if action_direction:
                 self.room_action_direction[room_name] = action_direction
 
         except Exception as e:
             self.log(f"Fehler bei Action: {e}", level="ERROR")
+
+    def _get_common_hvac_mode(self) -> Optional[str]:
+        current_state = self.get_current_state()
+        if current_state is None:
+            return None
+        rooms = current_state.get("rooms", {})
+        modes = []
+        for name, room in rooms.items():
+            mode = room.get("hvac_mode")
+            if mode and mode not in ["off", "unknown", "unavailable", None]:
+                modes.append(mode)
+        if not modes:
+            return None
+        return modes[0]
 
     def calculate_reward(self, state: Dict, in_unstable: bool = False) -> Dict:
         """Berechnet Reward für RL Training / Policy Learning
