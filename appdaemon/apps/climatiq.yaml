@@ -71,4 +71,5 @@ climatiq_controller:
     
     stability:
       max_actions_per_cycle: 2
-      sync_hvac_mode_on: true
+      auto_turn_off: true
+      auto_turn_on: false

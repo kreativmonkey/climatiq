@@ -471,30 +471,33 @@ class ClimatIQController(hass.Hass):
             for name, room in rooms.items()
             if room.get("is_on", False) and room["delta"] > 0.3 and room["target_temp"] > target_min
         ]
-        off_candidates.sort(key=lambda x: x[1]["delta"], reverse=True)
 
-        if self.last_stabilization_room and len(off_candidates) > 1:
-            off_candidates = [
-                (n, r) for n, r in off_candidates if n != self.last_stabilization_room
-            ]
+        auto_turn_off = rules.get("stability", {}).get("auto_turn_off", False)
+        if auto_turn_off:
+            off_candidates.sort(key=lambda x: x[1]["delta"], reverse=True)
 
-        if off_candidates:
-            name, room = off_candidates[0]
-            target = room["target_temp"]
-            new_target = target_min
-            self.last_stabilization_room = name
-            actions.append(
-                {
-                    "room": name,
-                    "old_target": target,
-                    "new_target": new_target,
-                    "hvac_mode": "off",
-                    "reason": f"Stabilisierung: Deaktiviere {name} (zu warm)",
-                    "action_direction": ActionDirection.COOLING,
-                }
-            )
-            self.log(f"  → Strategie 3: Deaktiviere {name} (hvac_mode=off)")
-            return actions
+            if self.last_stabilization_room and len(off_candidates) > 1:
+                off_candidates = [
+                    (n, r) for n, r in off_candidates if n != self.last_stabilization_room
+                ]
+
+            if off_candidates:
+                name, room = off_candidates[0]
+                target = room["target_temp"]
+                new_target = target_min
+                self.last_stabilization_room = name
+                actions.append(
+                    {
+                        "room": name,
+                        "old_target": target,
+                        "new_target": new_target,
+                        "hvac_mode": "off",
+                        "reason": f"Stabilisierung: Deaktiviere {name} (zu warm)",
+                        "action_direction": ActionDirection.COOLING,
+                    }
+                )
+                self.log(f"  → Strategie 3: Deaktiviere {name} (hvac_mode=off)")
+                return actions
 
         self.log(
             f"  → Keine Stabilisierung möglich (warm: {len(warm_rooms)}, cold: {len(cold_rooms)})"
@@ -761,9 +764,7 @@ class ClimatIQController(hass.Hass):
         try:
             if hvac_mode == "off":
                 self.call_service("climate/set_hvac_mode", entity_id=entity, hvac_mode="off")
-
-            sync_hvac = self.rules.get("stability", {}).get("sync_hvac_mode_on", False)
-            if sync_hvac and hvac_mode != "off":
+            else:
                 current_state = self.get_current_state()
                 if current_state is None:
                     current_state = {"rooms": {}}
