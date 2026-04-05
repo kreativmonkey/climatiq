@@ -29,8 +29,11 @@ Der Controller erkennt **automatisch** stabile/instabile Power-Zonen:
 # AppDaemon Log
 tail -f /config/appdaemon/logs/appdaemon.log | grep ClimatIQ
 
-# RL Training Log
+# RL Training Log (V3.2: now in appdaemon/logs/)
 tail -f /config/appdaemon/logs/climatiq_rl.jsonl
+
+# Zone Cache
+cat /config/appdaemon/logs/climatiq_zones_cache.json
 ```
 
 ## Erkannte Zonen prüfen
