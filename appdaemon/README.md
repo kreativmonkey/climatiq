@@ -52,5 +52,28 @@ Wenn die Power oszilliert (in instabiler Zone), versucht der Controller:
 1. **Target senken** bei warmen Räumen (die wärmsten zuerst)
 2. **Target erhöhen** bei kalten Räumen (damit sie Idle erreichen)
 3. **Abschalten** als letzten Ausweg (HVAC-Mode → off)
+4. **Neutral-Room-Anpassung** wenn alle Räume komfortabel sind, aber Power dennoch oszilliert
 
 Der Controller merkt sich den letzten angepassten Raum und wechselt beim nächsten Mal, um nicht immer denselben Raum zu adjustieren.
+
+## Oszillations-Erkennung (V3.2)
+
+Der Controller erkennt Oszillation auf zwei Arten:
+
+1. **Zonen-basiert**: Power liegt in einer instabilen Zone (z.B. 1000-1500W)
+2. **Zeitreihen-basiert**: Power variiert stark über Zeit (σ > 100W oder Spread > 200W)
+
+Die Zeitreihen-Erkennung verhindert falsch-positive Meldungen bei konstantem Power-Level.
+
+## Konfiguration (Optional)
+
+In `climatiq.yaml` können zusätzliche Parameter gesetzt werden:
+
+```yaml
+rules:
+  stability:
+    oscillation_std_threshold: 100    # StdDev-Schwelle für Oszillation (W)
+    oscillation_spread_threshold: 200  # Spread-Schwelle für Oszillation (W)
+    auto_turn_off: true              # Raum abschalten als letzten Ausweg
+    max_actions_per_cycle: 2         # Max. Aktionen pro Cycle
+```

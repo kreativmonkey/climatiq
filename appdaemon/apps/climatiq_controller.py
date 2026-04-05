@@ -1,5 +1,5 @@
 """
-ClimatIQ Controller V3.1 - AppDaemon Integration
+ClimatIQ Controller V3.2 - AppDaemon Integration
 
 Features:
 - Automatic zone detection at startup (GMM Clustering)
@@ -9,6 +9,8 @@ Features:
 - Power Zone Hysteresis: Prevents rapid zone transitions
 - Heat Demand Inference: Knows the difference between idle and not-enough-heat
 - Auto turn on/off rooms based on configuration
+- True Oscillation Detection: Tracks power variance over time
+- Stabilization for Neutral Rooms: Adjusts target even when all rooms are comfortable
 """
 
 import appdaemon.plugins.hass.hassapi as hass
@@ -47,8 +49,11 @@ class ClimatIQController(hass.Hass):
         self.room_action_direction: Dict[str, ActionDirection] = {}
         self.power_hysteresis_state: Optional[str] = None
         self.last_stabilization_room: Optional[str] = None
+        self.last_stabilization_direction: Optional[str] = None
+        self._power_readings: List[float] = []
+        self._max_power_history = 20
 
-        self.log("=== ClimatIQ Controller V3.1 ===")
+        self.log("=== ClimatIQ Controller V3.2 ===")
         self.log("Starte automatische Zonen-Erkennung...")
         self.detect_zones_from_history()
 
@@ -297,21 +302,21 @@ class ClimatIQController(hass.Hass):
                 f"Power: {state['power']:.0f}W | Outdoor: {state['outdoor_temp']:.1f}°C | Δ Total: {state['total_delta_abs']:.1f}K"
             )
 
-            # Check: Sind wir in instabiler Zone (OSZILLIEREND)?
-            in_unstable = self._is_in_unstable_zone(state["power"])
+            self._update_power_readings(state["power"])
 
-            # LOGIC FIX: Unstable = oscillating = BAD → Need to ACT, not do nothing!
-            # The algorithm should ALWAYS try to optimize, not give up when "unstable"
+            in_unstable_zone = self._is_in_unstable_zone(state["power"])
+            is_oscillating, osc_reason = self._detect_real_oscillation()
+
+            in_unstable = in_unstable_zone or is_oscillating
 
             if in_unstable:
+                reason = osc_reason if is_oscillating else "zone"
                 self.log(
-                    f"⚠️ Power OSZILLIEREND ({state['power']:.0f}W)! Starte Stabilisierung...",
+                    f"⚠️ Power OSZILLIEREND ({state['power']:.0f}W)! Starte Stabilisierung... ({reason})",
                     level="WARNING",
                 )
-                # Try stabilization strategies (sequentially)
-                actions = self._decide_stabilization_actions(state)
+                actions = self._decide_stabilization_actions(state, is_oscillating)
             else:
-                # Stable: Optimize for comfort + minimum power
                 actions = self.decide_actions(state)
 
             if not actions:
@@ -327,6 +332,25 @@ class ClimatIQController(hass.Hass):
 
         except Exception as e:
             self.log(f"Fehler: {e}", level="ERROR")
+
+    def _update_power_readings(self, power: float):
+        self._power_readings.append(power)
+        if len(self._power_readings) > self._max_power_history:
+            self._power_readings.pop(0)
+
+    def _detect_real_oscillation(self) -> tuple[bool, str]:
+        if len(self._power_readings) < 10:
+            return False, ""
+        recent = self._power_readings[-10:]
+        std = np.std(recent)
+        spread = max(recent) - min(recent)
+        osc_threshold_std = self.rules.get("stability", {}).get("oscillation_std_threshold", 100)
+        osc_threshold_spread = self.rules.get("stability", {}).get(
+            "oscillation_spread_threshold", 200
+        )
+        if std > osc_threshold_std or spread > osc_threshold_spread:
+            return True, f"σ={std:.0f}W, spread={spread:.0f}W"
+        return False, ""
 
     def _is_in_unstable_zone(self, power: float) -> bool:
         """Check if current power is in an unstable zone."""
@@ -390,13 +414,16 @@ class ClimatIQController(hass.Hass):
 
         return recommendation
 
-    def _decide_stabilization_actions(self, state: Dict) -> List[Dict]:
+    def _decide_stabilization_actions(
+        self, state: Dict, is_oscillating: bool = False
+    ) -> List[Dict]:
         actions = []
         rules = self.rules
         rooms = state["rooms"]
 
         warm_threshold = rules["comfort"]["temp_tolerance_warm"]
         target_min = rules["adjustments"]["target_min"]
+        target_max = rules["adjustments"]["target_max"]
 
         warm_rooms = [
             (name, room)
@@ -414,6 +441,7 @@ class ClimatIQController(hass.Hass):
             new_target = max(target - step, target_min)
             if new_target != target:
                 self.last_stabilization_room = name
+                self.last_stabilization_direction = "cooling"
                 actions.append(
                     {
                         "room": name,
@@ -429,7 +457,6 @@ class ClimatIQController(hass.Hass):
                 return actions
 
         cold_threshold = rules["comfort"]["temp_tolerance_cold"]
-        target_max = rules["adjustments"]["target_max"]
 
         cold_rooms = [
             (name, room) for name, room in rooms.items() if room["delta"] < -cold_threshold
@@ -445,6 +472,7 @@ class ClimatIQController(hass.Hass):
             new_target = min(target + step, target_max)
             if new_target != target:
                 self.last_stabilization_room = name
+                self.last_stabilization_direction = "heating"
                 actions.append(
                     {
                         "room": name,
@@ -477,6 +505,7 @@ class ClimatIQController(hass.Hass):
                 target = room["target_temp"]
                 new_target = target_min
                 self.last_stabilization_room = name
+                self.last_stabilization_direction = "cooling"
                 actions.append(
                     {
                         "room": name,
@@ -489,6 +518,56 @@ class ClimatIQController(hass.Hass):
                 )
                 self.log(f"  → Strategie 3: Deaktiviere {name} (hvac_mode=off)")
                 return actions
+
+        if is_oscillating:
+            neutral_rooms = [
+                (name, room) for name, room in rooms.items() if room.get("is_on", False)
+            ]
+            if not neutral_rooms:
+                neutral_rooms = [
+                    (name, room)
+                    for name, room in rooms.items()
+                    if room.get("is_on", False) is False
+                ]
+            neutral_rooms.sort(
+                key=lambda x: rules.get("unit_priorities", {}).get(x[0], 50), reverse=True
+            )
+            if neutral_rooms:
+                name, room = neutral_rooms[0]
+                target = room["target_temp"]
+                step = rules["adjustments"]["target_step"]
+                current_dir = self.last_stabilization_direction
+                if current_dir == "cooling":
+                    new_target = min(target + step, target_max)
+                    direction = ActionDirection.HEATING
+                elif current_dir == "heating":
+                    new_target = max(target - step, target_min)
+                    direction = ActionDirection.COOLING
+                else:
+                    if state["power"] < 400:
+                        new_target = min(target + step, target_max)
+                        direction = ActionDirection.HEATING
+                    else:
+                        new_target = max(target - step, target_min)
+                        direction = ActionDirection.COOLING
+                if new_target != target:
+                    self.last_stabilization_room = name
+                    self.last_stabilization_direction = (
+                        "cooling" if direction == ActionDirection.COOLING else "heating"
+                    )
+                    actions.append(
+                        {
+                            "room": name,
+                            "old_target": target,
+                            "new_target": new_target,
+                            "reason": f"Stabilisierung: {name} trotz neutral (Power oszilliert)",
+                            "action_direction": direction,
+                        }
+                    )
+                    self.log(
+                        f"  → Strategie 4: {name} Target {target}→{new_target}°C (neutral rooms)"
+                    )
+                    return actions
 
         self.log(
             f"  → Keine Stabilisierung möglich (warm: {len(warm_rooms)}, cold: {len(cold_rooms)})"
