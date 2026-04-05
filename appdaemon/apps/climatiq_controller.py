@@ -314,7 +314,9 @@ class ClimatIQController(hass.Hass):
                     f"⚠️ Power OSZILLIEREND ({state['power']:.0f}W)! Starte Stabilisierung... ({reason})",
                     level="WARNING",
                 )
-                actions = self._decide_stabilization_actions(state, is_oscillating)
+                actions = self._decide_stabilization_actions(
+                    state, is_oscillating or in_unstable_zone
+                )
             else:
                 actions = self.decide_actions(state)
 
@@ -516,7 +518,7 @@ class ClimatIQController(hass.Hass):
                 self.log(f"  → Strategie 3: Deaktiviere {name} (hvac_mode=off)")
                 return actions
 
-        if is_oscillating:
+        if is_oscillating or in_unstable_zone:
             neutral_rooms = [
                 (name, room) for name, room in rooms.items() if room.get("is_on", False)
             ]
