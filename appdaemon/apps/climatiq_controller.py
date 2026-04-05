@@ -269,8 +269,7 @@ class ClimatIQController(hass.Hass):
         ]
 
     def _save_zones_cache(self):
-        """Save detected zones to cache file."""
-        cache_path = "/config/appdaemon/logs/climatiq_zones_cache.json"
+        cache_path = os.path.join(self.config_dir, "climatiq_zones_cache.json")
         cache = {
             "timestamp": datetime.now().isoformat(),
             "stable_zones": self.stable_zones,
@@ -358,10 +357,10 @@ class ClimatIQController(hass.Hass):
         return in_unstable
 
     def _load_policy_table(self) -> dict:
-        """Load learned policy table from YAML file."""
         import yaml
 
-        policy_file = self.args.get("policy_file", "/config/appdaemon/logs/climatiq_policy.yaml")
+        default_policy = os.path.join(self.config_dir, "climatiq_policy.yaml")
+        policy_file = self.args.get("policy_file", default_policy)
 
         if not os.path.exists(policy_file):
             self.log(f"Policy file not found: {policy_file}", level="DEBUG")
@@ -934,7 +933,8 @@ class ClimatIQController(hass.Hass):
         """
         from datetime import datetime
 
-        log_file = self.args.get("log_file", "/config/appdaemon/logs/climatiq_rl.jsonl")
+        default_log = os.path.join(self.config_dir, "climatiq_rl.jsonl")
+        log_file = self.args.get("log_file", default_log)
 
         # Extract time features for policy learning
         try:

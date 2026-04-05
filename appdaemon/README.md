@@ -25,16 +25,20 @@ Der Controller erkennt **automatisch** stabile/instabile Power-Zonen:
 
 ## Logs
 
+Die Log-Dateien werden im AppDaemon-Konfigurationsverzeichnis gespeichert (standardmäßig `/config/appdaemon/`):
+
 ```bash
 # AppDaemon Log
 tail -f /config/appdaemon/logs/appdaemon.log | grep ClimatIQ
 
-# RL Training Log (V3.2: now in appdaemon/logs/)
-tail -f /config/appdaemon/logs/climatiq_rl.jsonl
+# RL Training Log
+tail -f /config/appdaemon/climatiq_rl.jsonl
 
 # Zone Cache
-cat /config/appdaemon/logs/climatiq_zones_cache.json
+cat /config/appdaemon/climatiq_zones_cache.json
 ```
+
+**Hinweis:** Der tatsächliche Pfad hängt von deiner AppDaemon-Konfiguration ab. Im Zweifelsfall suche nach `climatiq_rl.jsonl` im AppDaemon-Ordner.
 
 ## Erkannte Zonen prüfen
 
