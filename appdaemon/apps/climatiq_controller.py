@@ -414,6 +414,17 @@ class ClimatIQController(hass.Hass):
         rules = self.rules
         rooms = state["rooms"]
 
+        min_interval = rules.get("hysteresis", {}).get("min_action_interval_minutes", 10)
+        cooldown = timedelta(minutes=min_interval)
+
+        if self.last_stabilization_room:
+            last = self.last_action_time.get(self.last_stabilization_room, datetime.min)
+            if (datetime.now() - last) < cooldown:
+                self.log(
+                    f"  → Stabilisierung-Cooldown aktiv ({self.last_stabilization_room}, warte {min_interval}min)"
+                )
+                return []
+
         warm_threshold = rules["comfort"]["temp_tolerance_warm"]
         target_min = rules["adjustments"]["target_min"]
         target_max = rules["adjustments"]["target_max"]
