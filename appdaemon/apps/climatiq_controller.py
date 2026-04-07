@@ -423,7 +423,6 @@ class ClimatIQController(hass.Hass):
                 self.log(
                     f"  → Stabilisierung-Cooldown aktiv ({self.last_stabilization_room}, warte {min_interval}min)"
                 )
-                return []
 
         warm_threshold = rules["comfort"]["temp_tolerance_warm"]
         target_min = rules["adjustments"]["target_min"]
@@ -436,7 +435,7 @@ class ClimatIQController(hass.Hass):
         ]
         warm_rooms.sort(key=lambda x: x[1]["delta"], reverse=True)
 
-        if self.last_stabilization_room and len(warm_rooms) > 1:
+        if self.last_stabilization_room:
             warm_rooms = [(n, r) for n, r in warm_rooms if n != self.last_stabilization_room]
 
         for name, room in warm_rooms[:1]:
@@ -467,7 +466,7 @@ class ClimatIQController(hass.Hass):
         ]
         cold_rooms.sort(key=lambda x: x[1]["delta"])
 
-        if self.last_stabilization_room and len(cold_rooms) > 1:
+        if self.last_stabilization_room:
             cold_rooms = [(n, r) for n, r in cold_rooms if n != self.last_stabilization_room]
 
         for name, room in cold_rooms[:1]:
@@ -499,7 +498,7 @@ class ClimatIQController(hass.Hass):
         if auto_turn_off:
             off_candidates.sort(key=lambda x: x[1]["delta"], reverse=True)
 
-            if self.last_stabilization_room and len(off_candidates) > 1:
+            if self.last_stabilization_room:
                 off_candidates = [
                     (n, r) for n, r in off_candidates if n != self.last_stabilization_room
                 ]
@@ -532,6 +531,10 @@ class ClimatIQController(hass.Hass):
                     (name, room)
                     for name, room in rooms.items()
                     if room.get("is_on", False) is False
+                ]
+            if self.last_stabilization_room:
+                neutral_rooms = [
+                    (n, r) for n, r in neutral_rooms if n != self.last_stabilization_room
                 ]
             neutral_rooms.sort(
                 key=lambda x: rules.get("unit_priorities", {}).get(x[0], 50), reverse=True
