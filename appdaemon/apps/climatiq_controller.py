@@ -1,5 +1,5 @@
 """
-ClimatIQ Controller V3.2 - AppDaemon Integration
+ClimatIQ Controller V3.3 - AppDaemon Integration
 
 Features:
 - Automatic zone detection at startup (GMM Clustering)
@@ -53,7 +53,7 @@ class ClimatIQController(hass.Hass):
         self._power_readings: List[float] = []
         self._max_power_history = 20
 
-        self.log("=== ClimatIQ Controller V3.2 ===")
+        self.log("=== ClimatIQ Controller V3.3 ===")
         self.log("Starte automatische Zonen-Erkennung...")
         self.detect_zones_from_history()
 
@@ -347,6 +347,10 @@ class ClimatIQController(hass.Hass):
             return True, f"σ={std:.0f}W, spread={spread:.0f}W"
         return False, ""
 
+    @staticmethod
+    def _round_to_half(value: float) -> float:
+        return round(value * 2) / 2
+
     def _is_in_unstable_zone(self, power: float) -> bool:
         """Check if current power is in an unstable zone."""
         in_unstable, _ = self._check_unstable_zone_hysteresis(power)
@@ -438,11 +442,23 @@ class ClimatIQController(hass.Hass):
         if self.last_stabilization_room:
             warm_rooms = [(n, r) for n, r in warm_rooms if n != self.last_stabilization_room]
 
-        for name, room in warm_rooms[:1]:
+        for name, room in warm_rooms:
             target = room["target_temp"]
+            device_setpoint = room.get("device_setpoint")
+            delta = room["delta"]
+
+            reduction = delta / 2
             step = rules["adjustments"]["target_step"]
-            new_target = max(target - step, target_min)
-            if new_target != target:
+            reduction = min(reduction, step)
+            reduction = self._round_to_half(reduction)
+
+            new_target = target - reduction
+            new_target = max(new_target, target_min)
+
+            if device_setpoint is not None and abs(new_target - device_setpoint) < 0.25:
+                continue
+
+            if new_target < target:
                 self.last_stabilization_room = name
                 self.last_stabilization_direction = "cooling"
                 actions.append(
@@ -450,12 +466,12 @@ class ClimatIQController(hass.Hass):
                         "room": name,
                         "old_target": target,
                         "new_target": new_target,
-                        "reason": f"Stabilisierung: Reduziere {room['delta']:.1f}K (warm)",
+                        "reason": f"Stabilisierung: Reduziere {delta:.1f}K → -{reduction}K",
                         "action_direction": ActionDirection.COOLING,
                     }
                 )
                 self.log(
-                    f"  → Strategie 1: Reduziere {name} Target {target}→{new_target}°C (war {room['delta']:.1f}K warm)"
+                    f"  → Strategie 1: Reduziere {name} Target {target}→{new_target}°C ({delta:.1f}K warm → -{reduction}K)"
                 )
                 return actions
 
@@ -469,11 +485,23 @@ class ClimatIQController(hass.Hass):
         if self.last_stabilization_room:
             cold_rooms = [(n, r) for n, r in cold_rooms if n != self.last_stabilization_room]
 
-        for name, room in cold_rooms[:1]:
+        for name, room in cold_rooms:
             target = room["target_temp"]
+            device_setpoint = room.get("device_setpoint")
+            delta = room["delta"]
+
+            increase = abs(delta) / 2
             step = rules["adjustments"]["target_step"]
-            new_target = min(target + step, target_max)
-            if new_target != target:
+            increase = min(increase, step)
+            increase = self._round_to_half(increase)
+
+            new_target = target + increase
+            new_target = min(new_target, target_max)
+
+            if device_setpoint is not None and abs(new_target - device_setpoint) < 0.25:
+                continue
+
+            if new_target > target:
                 self.last_stabilization_room = name
                 self.last_stabilization_direction = "heating"
                 actions.append(
@@ -481,11 +509,13 @@ class ClimatIQController(hass.Hass):
                         "room": name,
                         "old_target": target,
                         "new_target": new_target,
-                        "reason": f"Stabilisierung: Erhöhe {name} für Idle",
+                        "reason": f"Stabilisierung: Erhöhe {abs(delta):.1f}K → +{increase}K",
                         "action_direction": ActionDirection.HEATING,
                     }
                 )
-                self.log(f"  → Strategie 2: Erhöhe {name} Target {target}→{new_target}°C")
+                self.log(
+                    f"  → Strategie 2: Erhöhe {name} Target {target}→{new_target}°C ({abs(delta):.1f}K cold → +{increase}K)"
+                )
                 return actions
 
         off_candidates = [
@@ -706,6 +736,7 @@ class ClimatIQController(hass.Hass):
                 curr = self.get_state(cfg["temp_sensor"])
                 target_cfg = cfg.get("target_temp", self.default_target_temp)
                 hvac_mode = self.get_state(cfg["climate_entity"])
+                device_setpoint = self.get_state(cfg["climate_entity"], attribute="temperature")
 
                 if curr in ["unknown", "unavailable", None]:
                     continue
@@ -719,9 +750,15 @@ class ClimatIQController(hass.Hass):
                 else:
                     targ = float(target_cfg)
 
+                if device_setpoint in ["unknown", "unavailable", None]:
+                    device_setpoint = None
+                else:
+                    device_setpoint = float(device_setpoint)
+
                 rooms[name] = {
                     "current_temp": float(curr),
                     "target_temp": targ,
+                    "device_setpoint": device_setpoint,
                     "delta": float(curr) - targ,
                     "hvac_mode": hvac_mode,
                     "is_on": hvac_mode not in ["off", "unknown", "unavailable"],
